@@ -1,0 +1,18 @@
+# Docker Compose Override for Local Development
+# This file is automatically loaded by docker-compose and overrides base settings
+
+version: '3.8'
+
+services:
+  # Override for local development with volume mounts
+  dev:
+    volumes:
+      - .:/app  # Mount entire project for live editing
+      - /app/.venv  # Exclude virtual environment
+      - /app/build  # Exclude build artifacts
+      - /app/dist   # Exclude distribution files
+      - /app/htmlcov  # Exclude coverage reports
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+      - BLACKHOLIO_DEV_MODE=true

@@ -1,0 +1,73 @@
+# Production Docker Compose Configuration
+# Use with: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up
+
+version: '3.8'
+
+services:
+  # Production blackholio client
+  blackholio-client:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+      args:
+        - BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+        - VERSION=${VERSION:-latest}
+    image: blackholio/python-client:${VERSION:-latest}
+    restart: unless-stopped
+    environment:
+      - SERVER_LANGUAGE=${SERVER_LANGUAGE:-rust}
+      - SERVER_IP=${SERVER_IP:-spacetimedb.blackholio.com}
+      - SERVER_PORT=${SERVER_PORT:-443}
+      - BLACKHOLIO_LOG_LEVEL=${LOG_LEVEL:-WARNING}
+      - BLACKHOLIO_SSL_ENABLED=true
+      - BLACKHOLIO_CONNECTION_TIMEOUT=60
+      - BLACKHOLIO_MAX_RETRIES=5
+      - BLACKHOLIO_POOL_MIN_SIZE=2
+      - BLACKHOLIO_POOL_MAX_SIZE=10
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    healthcheck:
+      test: ["CMD", "python", "-c", "from blackholio_client import create_game_client; print('healthy')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - blackholio-prod
+    labels:
+      - "com.blackholio.service=python-client"
+      - "com.blackholio.version=${VERSION:-latest}"
+
+  # Production metrics exporter (optional)
+  metrics-exporter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    image: blackholio/python-client-metrics:${VERSION:-latest}
+    restart: unless-stopped
+    environment:
+      - SERVER_LANGUAGE=${SERVER_LANGUAGE:-rust}
+      - SERVER_IP=${SERVER_IP:-spacetimedb.blackholio.com}
+      - SERVER_PORT=${SERVER_PORT:-443}
+      - METRICS_PORT=9090
+      - BLACKHOLIO_LOG_LEVEL=INFO
+    ports:
+      - "9090:9090"
+    networks:
+      - blackholio-prod
+    command: ["python", "-m", "blackholio_client.metrics_server"]
+
+networks:
+  blackholio-prod:
+    driver: overlay
+    attachable: true
+    driver_opts:
+      encrypted: "true"

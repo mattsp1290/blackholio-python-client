@@ -1,0 +1,274 @@
+name: Development Workflow
+
+on:
+  push:
+    branches: 
+      - 'feature/*'
+      - 'bugfix/*' 
+      - 'hotfix/*'
+      - develop
+  pull_request:
+    branches: 
+      - main
+      - develop
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  # Quick validation for development branches
+  quick-validation:
+    name: Quick Development Validation
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: Cache dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-dev-${{ hashFiles('requirements-dev.txt') }}
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-dev.txt
+        pip install -e .
+        
+    - name: Code formatting check
+      run: |
+        black --check --diff src/ tests/
+        
+    - name: Import sorting check
+      run: |
+        isort --check-only --diff src/ tests/
+        
+    - name: Quick linting
+      run: |
+        flake8 src/blackholio_client/ --select=E9,F63,F7,F82 --show-source --statistics
+        
+    - name: Type checking
+      run: |
+        mypy src/blackholio_client/ --ignore-missing-imports
+        
+    - name: Quick tests
+      run: |
+        pytest tests/test_core_modules.py -v --tb=short
+        pytest tests/test_utils_focused.py -v --tb=short
+
+  # More comprehensive testing for PR validation
+  pr-validation:
+    name: Pull Request Validation
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.11']
+        
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-dev.txt
+        pip install -e .
+        
+    - name: Full linting
+      run: |
+        flake8 src/ tests/
+        pylint src/blackholio_client/ --fail-under=8.0
+        
+    - name: Security checks
+      run: |
+        bandit -r src/ -f json -o bandit_dev_report.json
+        safety check
+        
+    - name: Unit tests with coverage
+      run: |
+        pytest tests/ -v --cov=src/blackholio_client --cov-report=xml --cov-fail-under=20
+        
+    - name: Performance regression check
+      run: |
+        pytest tests/test_performance.py -v --tb=short
+        
+    - name: Upload coverage
+      if: matrix.python-version == '3.11'
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: pr-validation
+
+  # Documentation validation
+  docs-validation:
+    name: Documentation Validation
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: Install documentation dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-dev.txt
+        pip install -e .
+        
+    - name: Validate markdown links
+      run: |
+        # Check for broken internal links in documentation
+        find docs/ -name "*.md" -exec grep -l "](docs/" {} \; | while read file; do
+          echo "Checking links in $file"
+          grep -o "](docs/[^)]*)" "$file" | sed 's/](//;s/)//' | while read link; do
+            if [ ! -f "$link" ]; then
+              echo "❌ Broken link in $file: $link"
+              exit 1
+            fi
+          done
+        done
+        
+    - name: Validate code examples in docs
+      run: |
+        # Extract and validate Python code blocks from documentation
+        python -c "
+        import re
+        import os
+        import subprocess
+        
+        doc_files = []
+        for root, dirs, files in os.walk('docs/'):
+            for file in files:
+                if file.endswith('.md'):
+                    doc_files.append(os.path.join(root, file))
+        
+        for doc_file in doc_files:
+            with open(doc_file, 'r') as f:
+                content = f.read()
+            
+            # Find Python code blocks
+            python_blocks = re.findall(r'\`\`\`python\n(.*?)\n\`\`\`', content, re.DOTALL)
+            
+            for i, block in enumerate(python_blocks):
+                if 'import blackholio_client' in block or 'from blackholio_client' in block:
+                    print(f'Validating code block {i+1} from {doc_file}')
+                    # Write to temp file and syntax check
+                    with open(f'temp_code_{i}.py', 'w') as temp:
+                        temp.write(block)
+                    
+                    result = subprocess.run(['python', '-m', 'py_compile', f'temp_code_{i}.py'], 
+                                          capture_output=True)
+                    if result.returncode != 0:
+                        print(f'❌ Syntax error in {doc_file} block {i+1}')
+                        print(result.stderr.decode())
+                        exit(1)
+                    
+                    os.remove(f'temp_code_{i}.py')
+        
+        print('✅ All documentation code examples validated')
+        "
+
+  # Label and assign PRs automatically
+  pr-automation:
+    name: PR Automation
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && github.event.action == 'opened'
+    
+    steps:
+    - name: Auto-label PR
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const { owner, repo } = context.repo;
+          const prNumber = context.payload.pull_request.number;
+          const branchName = context.payload.pull_request.head.ref;
+          
+          let labels = [];
+          
+          // Auto-label based on branch name
+          if (branchName.startsWith('feature/')) {
+            labels.push('enhancement');
+          } else if (branchName.startsWith('bugfix/')) {
+            labels.push('bug');
+          } else if (branchName.startsWith('hotfix/')) {
+            labels.push('bug', 'priority-high');
+          } else if (branchName.includes('doc')) {
+            labels.push('documentation');
+          } else if (branchName.includes('test')) {
+            labels.push('testing');
+          }
+          
+          // Auto-label based on changed files
+          const files = await github.rest.pulls.listFiles({
+            owner,
+            repo,
+            pull_number: prNumber
+          });
+          
+          const changedFiles = files.data.map(f => f.filename);
+          
+          if (changedFiles.some(f => f.includes('security'))) {
+            labels.push('security');
+          }
+          
+          if (changedFiles.some(f => f.includes('performance') || f.includes('test_performance'))) {
+            labels.push('performance');
+          }
+          
+          if (changedFiles.some(f => f.includes('docker') || f.includes('Dockerfile'))) {
+            labels.push('docker');
+          }
+          
+          if (changedFiles.some(f => f.includes('.github/workflows'))) {
+            labels.push('ci-cd');
+          }
+          
+          // Apply labels
+          if (labels.length > 0) {
+            await github.rest.issues.addLabels({
+              owner,
+              repo,
+              issue_number: prNumber,
+              labels: labels
+            });
+          }
+          
+    - name: Request appropriate reviewers
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const { owner, repo } = context.repo;
+          const prNumber = context.payload.pull_request.number;
+          const author = context.payload.pull_request.user.login;
+          
+          // Don't request review from the author
+          const possibleReviewers = ['punk1290']; // Add other team members
+          const reviewers = possibleReviewers.filter(r => r !== author);
+          
+          if (reviewers.length > 0) {
+            await github.rest.pulls.requestReviewers({
+              owner,
+              repo,
+              pull_number: prNumber,
+              reviewers: reviewers.slice(0, 2) // Request up to 2 reviewers
+            });
+          }

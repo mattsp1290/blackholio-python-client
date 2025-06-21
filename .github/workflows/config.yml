@@ -1,0 +1,99 @@
+# GitHub Actions Configuration
+# This file documents the CI/CD pipeline configuration for blackholio-python-client
+
+workflows:
+  ci.yml:
+    description: "Main CI/CD pipeline with comprehensive testing across all server languages"
+    triggers:
+      - push: [main, develop]
+      - pull_request: [main, develop] 
+      - schedule: "daily at 2 AM UTC"
+    jobs:
+      - code-quality: "Security, formatting, linting, type checking"
+      - unit-tests: "Python 3.8-3.12 compatibility testing"
+      - integration-tests-rust: "Rust server compatibility (fully vetted)"
+      - integration-tests-python: "Python server compatibility (fully vetted)"
+      - integration-tests-csharp: "C# server compatibility (newer implementation)"
+      - integration-tests-go: "Go server compatibility (newer implementation)"
+      - performance-tests: "Load testing and performance validation"
+      - docker-tests: "Container compatibility validation"
+      - package-build: "Package building and distribution validation"
+      - deployment-readiness: "Final deployment readiness assessment"
+      - release: "Automated release on version tags"
+
+  daily-health-check.yml:
+    description: "Daily monitoring and health validation"
+    triggers:
+      - schedule: "daily at 6 AM UTC"
+      - manual trigger
+    purpose: "Early detection of issues and dependency problems"
+
+  dependency-update.yml:
+    description: "Automated dependency management"
+    triggers:
+      - schedule: "weekly on Mondays at 3 AM UTC"
+      - manual trigger
+    purpose: "Security updates and dependency maintenance"
+
+  release.yml:
+    description: "Release automation and validation"
+    triggers:
+      - version tags (v*)
+      - manual trigger with version input
+    purpose: "Automated release creation with full validation"
+
+  dev.yml:
+    description: "Development workflow for feature branches"
+    triggers:
+      - feature/*, bugfix/*, hotfix/* branches
+      - pull requests
+    purpose: "Fast feedback for development work"
+
+environment_variables:
+  required_secrets:
+    - GITHUB_TOKEN: "Automatically provided by GitHub"
+  
+  optional_secrets:
+    - CODECOV_TOKEN: "For coverage reporting (if using Codecov)"
+    
+ci_configuration:
+  python_versions: ['3.8', '3.9', '3.10', '3.11', '3.12']
+  primary_python: '3.11'
+  
+  server_languages:
+    rust:
+      status: "fully vetted"
+      port: 3000
+      requirements: ["rust toolchain"]
+    python:
+      status: "fully vetted" 
+      port: 3001
+      requirements: ["python 3.8+"]
+    csharp:
+      status: "newer implementation"
+      port: 3002
+      requirements: [".NET 7.0"]
+      auto_documentation: true
+    go:
+      status: "newer implementation"
+      port: 3003
+      requirements: ["go 1.21"]
+      auto_documentation: true
+
+performance_targets:
+  vector_operations: "100,000+ ops/sec"
+  entity_operations: "5,000+ entities/sec" 
+  physics_calculations: "5,000+ calcs/sec"
+  memory_efficiency: "< 15 KB per entity"
+  coverage_minimum: "20%"
+  
+security_standards:
+  tools: ["bandit", "safety", "custom security audit"]
+  score_minimum: "90%"
+  critical_vulnerabilities: "0 allowed"
+  
+artifact_retention:
+  test_results: "30 days"
+  performance_reports: "90 days"
+  security_reports: "180 days"
+  package_builds: "1 year"

@@ -1,0 +1,226 @@
+name: Release Automation
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 1.0.0)'
+        required: true
+        type: string
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  validate-release:
+    name: Validate Release
+    runs-on: ubuntu-latest
+    
+    outputs:
+      version: ${{ steps.get-version.outputs.version }}
+      
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Get version
+      id: get-version
+      run: |
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          VERSION="${{ github.event.inputs.version }}"
+        else
+          VERSION=${GITHUB_REF#refs/tags/v}
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Release version: $VERSION"
+        
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: Install version management tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install toml
+        
+    - name: Validate package version
+      run: |
+        # Use our version manager for validation
+        python scripts/version_manager.py current
+        
+        # Cross-validate with release version
+        CURRENT_VERSION=$(python scripts/version_manager.py current | cut -d' ' -f3)
+        RELEASE_VERSION="${{ steps.get-version.outputs.version }}"
+        
+        if [[ "$CURRENT_VERSION" != "$RELEASE_VERSION" ]]; then
+            echo "❌ Version mismatch: package=$CURRENT_VERSION, release=$RELEASE_VERSION"
+            exit 1
+        fi
+        
+        echo "✅ Version validated: $CURRENT_VERSION"
+        
+    - name: Run full test suite
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-dev.txt
+        pip install -e .
+        
+        # Run comprehensive tests
+        pytest tests/ -v --cov=src/blackholio_client --cov-fail-under=20
+        
+        # Run security audit
+        python security_audit.py
+        
+        # Run performance validation
+        pytest tests/test_performance.py -v
+
+  build-package:
+    name: Build Release Package
+    runs-on: ubuntu-latest
+    needs: validate-release
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: Install build tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine wheel setuptools
+        
+    - name: Build package
+      run: |
+        python -m build
+        
+    - name: Validate package
+      run: |
+        twine check dist/*
+        
+        # Test installation
+        pip install dist/*.whl
+        python -c "import blackholio_client; print('Package installs correctly')"
+        
+    - name: Upload package artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: release-package
+        path: dist/
+
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [validate-release, build-package]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download package
+      uses: actions/download-artifact@v3
+      with:
+        name: release-package
+        path: dist/
+        
+    - name: Generate changelog
+      run: |
+        # Create a basic changelog from recent commits
+        echo "# Release Notes v${{ needs.validate-release.outputs.version }}" > RELEASE_NOTES.md
+        echo "" >> RELEASE_NOTES.md
+        echo "## What's New" >> RELEASE_NOTES.md
+        
+        # Get commits since last tag
+        if git describe --tags --abbrev=0 HEAD~1 2>/dev/null; then
+          LAST_TAG=$(git describe --tags --abbrev=0 HEAD~1)
+          echo "Changes since $LAST_TAG:" >> RELEASE_NOTES.md
+          git log --pretty=format:"- %s" $LAST_TAG..HEAD >> RELEASE_NOTES.md
+        else
+          echo "- Initial release" >> RELEASE_NOTES.md
+        fi
+        
+        echo "" >> RELEASE_NOTES.md
+        echo "## Installation" >> RELEASE_NOTES.md
+        echo '```bash' >> RELEASE_NOTES.md
+        echo "pip install git+https://github.com/${{ github.repository }}@v${{ needs.validate-release.outputs.version }}" >> RELEASE_NOTES.md
+        echo '```' >> RELEASE_NOTES.md
+        
+        echo "" >> RELEASE_NOTES.md
+        echo "## Server Language Support" >> RELEASE_NOTES.md
+        echo "- ✅ Rust (fully vetted)" >> RELEASE_NOTES.md
+        echo "- ✅ Python (fully vetted)" >> RELEASE_NOTES.md
+        echo "- ⚠️ C# (newer implementation)" >> RELEASE_NOTES.md
+        echo "- ⚠️ Go (newer implementation)" >> RELEASE_NOTES.md
+        
+        echo "" >> RELEASE_NOTES.md
+        echo "## Documentation" >> RELEASE_NOTES.md
+        echo "- [API Reference](docs/API_REFERENCE.md)" >> RELEASE_NOTES.md
+        echo "- [Installation Guide](docs/INSTALLATION.md)" >> RELEASE_NOTES.md
+        echo "- [Docker Deployment](docs/DOCKER_DEPLOYMENT.md)" >> RELEASE_NOTES.md
+        echo "- [Troubleshooting](docs/TROUBLESHOOTING.md)" >> RELEASE_NOTES.md
+        
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v${{ needs.validate-release.outputs.version }}
+        name: Blackholio Python Client v${{ needs.validate-release.outputs.version }}
+        body_path: RELEASE_NOTES.md
+        files: |
+          dist/*.whl
+          dist/*.tar.gz
+        draft: false
+        prerelease: false
+        
+    - name: Notify teams
+      run: |
+        echo "🚀 Release v${{ needs.validate-release.outputs.version }} created successfully!"
+        echo "Package available at: https://github.com/${{ github.repository }}/releases/tag/v${{ needs.validate-release.outputs.version }}"
+
+  post-release-validation:
+    name: Post-Release Validation
+    runs-on: ubuntu-latest
+    needs: [validate-release, create-release]
+    
+    steps:
+    - name: Test installation from GitHub
+      run: |
+        python -m pip install --upgrade pip
+        pip install git+https://github.com/${{ github.repository }}@v${{ needs.validate-release.outputs.version }}
+        
+        # Validate installation
+        python -c "
+        import blackholio_client
+        from blackholio_client import create_game_client
+        print('✅ Release package installs and imports correctly')
+        print(f'Version: {blackholio_client.__version__ if hasattr(blackholio_client, \"__version__\") else \"unknown\"}')
+        "
+        
+    - name: Create post-release issue
+      if: failure()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const title = `🚨 Post-Release Validation Failed - v${{ needs.validate-release.outputs.version }}`;
+          const body = `Post-release validation failed for version ${{ needs.validate-release.outputs.version }}.
+          
+          **Release:** https://github.com/${{ github.repository }}/releases/tag/v${{ needs.validate-release.outputs.version }}
+          **Workflow:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          
+          The package may not be installable from GitHub. Please investigate immediately.
+          
+          This issue was automatically created by the release workflow.`;
+          
+          github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: title,
+            body: body,
+            labels: ['bug', 'release', 'critical']
+          });

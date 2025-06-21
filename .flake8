@@ -1,0 +1,78 @@
+[flake8]
+# Flake8 configuration for blackholio-python-client
+
+# Maximum line length
+max-line-length = 100
+
+# Maximum complexity
+max-complexity = 10
+
+# Ignore rules
+ignore = 
+    # Line too long - handled by black
+    E501,
+    # Whitespace before ':' - conflicts with black
+    E203,
+    # Line break before binary operator - conflicts with black
+    W503,
+    # Missing docstring in __init__
+    D107,
+    # Missing docstring in magic method
+    D105,
+    # First line should be in imperative mood
+    D401,
+    # 1 blank line required between summary line and description
+    D205,
+    # First line should end with a period
+    D400,
+    # Section underline is too short
+    D409,
+    # Missing type annotation for self in method
+    ANN101,
+    # Missing type annotation for cls in classmethod
+    ANN102
+
+# Exclude paths
+exclude = 
+    .git,
+    __pycache__,
+    .venv,
+    venv,
+    .eggs,
+    *.egg,
+    build,
+    dist,
+    .pytest_cache,
+    .mypy_cache,
+    .coverage,
+    htmlcov,
+    .tox,
+    docs/_build,
+    tests/fixtures
+
+# Per file ignores
+per-file-ignores =
+    # Ignore imports in __init__ files
+    __init__.py: F401, F403
+    # Ignore docstrings in tests
+    tests/*: D100, D101, D102, D103, D104
+    # Ignore complexity in conftest
+    conftest.py: C901
+
+# Statistics
+statistics = True
+count = True
+
+# Format
+format = %(path)s:%(row)d:%(col)d: %(code)s %(text)s
+
+# Plugins
+docstring-convention = google
+
+# McCabe complexity
+mccabe:
+    max-complexity = 10
+
+# Import order style
+import-order-style = google
+application-import-names = blackholio_client

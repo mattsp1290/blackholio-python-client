@@ -1,0 +1,128 @@
+version: '3.8'
+
+services:
+  # Test with Rust server configuration
+  test-rust:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: test-runner
+    environment:
+      - SERVER_LANGUAGE=rust
+      - SERVER_IP=spacetimedb-rust
+      - SERVER_PORT=8080
+      - BLACKHOLIO_LOG_LEVEL=DEBUG
+      - BLACKHOLIO_CONNECTION_TIMEOUT=30
+      - BLACKHOLIO_MAX_RETRIES=3
+      - BLACKHOLIO_SSL_ENABLED=false
+    volumes:
+      - ./test-results/rust:/app/test-results
+      - ./src:/app/src:ro
+      - ./tests:/app/tests:ro
+    networks:
+      - blackholio-net
+
+  # Test with Python server configuration
+  test-python:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: test-runner
+    environment:
+      - SERVER_LANGUAGE=python
+      - SERVER_IP=spacetimedb-python
+      - SERVER_PORT=8081
+      - BLACKHOLIO_LOG_LEVEL=DEBUG
+      - BLACKHOLIO_CONNECTION_TIMEOUT=30
+      - BLACKHOLIO_MAX_RETRIES=3
+      - BLACKHOLIO_SSL_ENABLED=false
+    volumes:
+      - ./test-results/python:/app/test-results
+      - ./src:/app/src:ro
+      - ./tests:/app/tests:ro
+    networks:
+      - blackholio-net
+
+  # Test with C# server configuration
+  test-csharp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: test-runner
+    environment:
+      - SERVER_LANGUAGE=csharp
+      - SERVER_IP=spacetimedb-csharp
+      - SERVER_PORT=8082
+      - BLACKHOLIO_LOG_LEVEL=DEBUG
+      - BLACKHOLIO_CONNECTION_TIMEOUT=30
+      - BLACKHOLIO_MAX_RETRIES=3
+      - BLACKHOLIO_SSL_ENABLED=false
+    volumes:
+      - ./test-results/csharp:/app/test-results
+      - ./src:/app/src:ro
+      - ./tests:/app/tests:ro
+    networks:
+      - blackholio-net
+
+  # Test with Go server configuration
+  test-go:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: test-runner
+    environment:
+      - SERVER_LANGUAGE=go
+      - SERVER_IP=spacetimedb-go
+      - SERVER_PORT=8083
+      - BLACKHOLIO_LOG_LEVEL=DEBUG
+      - BLACKHOLIO_CONNECTION_TIMEOUT=30
+      - BLACKHOLIO_MAX_RETRIES=3
+      - BLACKHOLIO_SSL_ENABLED=false
+    volumes:
+      - ./test-results/go:/app/test-results
+      - ./src:/app/src:ro
+      - ./tests:/app/tests:ro
+    networks:
+      - blackholio-net
+
+  # Production-like environment test
+  test-production:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    environment:
+      - SERVER_LANGUAGE=rust
+      - SERVER_IP=production-server
+      - SERVER_PORT=443
+      - BLACKHOLIO_LOG_LEVEL=WARNING
+      - BLACKHOLIO_SSL_ENABLED=true
+      - BLACKHOLIO_CONNECTION_TIMEOUT=60
+      - BLACKHOLIO_MAX_RETRIES=5
+    networks:
+      - blackholio-net
+
+  # Interactive development container
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    environment:
+      - SERVER_LANGUAGE=${SERVER_LANGUAGE:-rust}
+      - SERVER_IP=${SERVER_IP:-localhost}
+      - SERVER_PORT=${SERVER_PORT:-8080}
+      - BLACKHOLIO_LOG_LEVEL=DEBUG
+    volumes:
+      - ./src:/app/src
+      - ./tests:/app/tests
+      - ./test-results/dev:/app/test-results
+    networks:
+      - blackholio-net
+    command: /bin/bash
+    stdin_open: true
+    tty: true
+
+networks:
+  blackholio-net:
+    driver: bridge

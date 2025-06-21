@@ -1,0 +1,657 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run daily at 2 AM UTC for continuous validation
+    - cron: '0 2 * * *'
+
+env:
+  PYTHON_VERSION: '3.11'
+  POETRY_VERSION: '1.5.1'
+
+jobs:
+  # Job 1: Code Quality and Security
+  code-quality:
+    name: Code Quality & Security
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements-dev.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+          
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-dev.txt
+        pip install -e .
+        
+    - name: Run security audit
+      run: |
+        python security_audit.py
+        
+    - name: Run code formatting checks
+      run: |
+        black --check --diff src/ tests/
+        isort --check-only --diff src/ tests/
+        
+    - name: Run linting
+      run: |
+        flake8 src/ tests/
+        pylint src/blackholio_client/
+        
+    - name: Run type checking
+      run: |
+        mypy src/blackholio_client/
+        
+    - name: Run additional security scans
+      run: |
+        bandit -r src/ -f json -o bandit_ci_report.json || true
+        safety check --json --output safety_ci_report.json || true
+        
+    - name: Upload security reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: security-reports
+        path: |
+          bandit_ci_report.json
+          safety_ci_report.json
+          security_audit_report.json
+
+  # Job 2: Unit Tests
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
+        
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+        
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-${{ matrix.python-version }}-pip-${{ hashFiles('requirements-dev.txt') }}
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-dev.txt
+        pip install -e .
+        
+    - name: Run unit tests with coverage
+      run: |
+        pytest tests/ -v --cov=src/blackholio_client --cov-report=xml --cov-report=html --cov-fail-under=20
+        
+    - name: Upload coverage to Codecov
+      if: matrix.python-version == '3.11'
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-results-${{ matrix.python-version }}
+        path: |
+          coverage.xml
+          htmlcov/
+
+  # Job 3: Integration Tests - Rust Server
+  integration-tests-rust:
+    name: Integration Tests - Rust Server
+    runs-on: ubuntu-latest
+    needs: [code-quality, unit-tests]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+        
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-dev.txt
+        pip install -e .
+        
+    - name: Set up SpacetimeDB CLI (Mock)
+      run: |
+        # Create mock SpacetimeDB CLI for CI environment
+        mkdir -p /tmp/spacetimedb/bin
+        echo '#!/bin/bash' > /tmp/spacetimedb/bin/spacetimedb
+        echo 'echo "Mock SpacetimeDB CLI for CI"' >> /tmp/spacetimedb/bin/spacetimedb
+        chmod +x /tmp/spacetimedb/bin/spacetimedb
+        echo "/tmp/spacetimedb/bin" >> $GITHUB_PATH
+        
+    - name: Run Rust server integration tests
+      env:
+        SERVER_LANGUAGE: rust
+        SERVER_IP: localhost
+        SERVER_PORT: 3000
+        SPACETIMEDB_CLI_PATH: /tmp/spacetimedb/bin/spacetimedb
+      run: |
+        pytest tests/integration/ -v -m "server_rust or not server_required" --tb=short
+        
+    - name: Upload integration test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: integration-results-rust
+        path: test-results/
+
+  # Job 4: Integration Tests - Python Server
+  integration-tests-python:
+    name: Integration Tests - Python Server
+    runs-on: ubuntu-latest
+    needs: [code-quality, unit-tests]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-dev.txt
+        pip install -e .
+        
+    - name: Set up SpacetimeDB CLI (Mock)
+      run: |
+        mkdir -p /tmp/spacetimedb/bin
+        echo '#!/bin/bash' > /tmp/spacetimedb/bin/spacetimedb
+        echo 'echo "Mock SpacetimeDB CLI for CI"' >> /tmp/spacetimedb/bin/spacetimedb
+        chmod +x /tmp/spacetimedb/bin/spacetimedb
+        echo "/tmp/spacetimedb/bin" >> $GITHUB_PATH
+        
+    - name: Run Python server integration tests
+      env:
+        SERVER_LANGUAGE: python
+        SERVER_IP: localhost
+        SERVER_PORT: 3001
+        SPACETIMEDB_CLI_PATH: /tmp/spacetimedb/bin/spacetimedb
+      run: |
+        pytest tests/integration/ -v -m "server_python or not server_required" --tb=short
+        
+    - name: Upload integration test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: integration-results-python
+        path: test-results/
+
+  # Job 5: Integration Tests - C# Server
+  integration-tests-csharp:
+    name: Integration Tests - C# Server
+    runs-on: ubuntu-latest
+    needs: [code-quality, unit-tests]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: Set up .NET
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: '7.0'
+        
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-dev.txt
+        pip install -e .
+        
+    - name: Set up SpacetimeDB CLI (Mock)
+      run: |
+        mkdir -p /tmp/spacetimedb/bin
+        echo '#!/bin/bash' > /tmp/spacetimedb/bin/spacetimedb
+        echo 'echo "Mock SpacetimeDB CLI for CI"' >> /tmp/spacetimedb/bin/spacetimedb
+        chmod +x /tmp/spacetimedb/bin/spacetimedb
+        echo "/tmp/spacetimedb/bin" >> $GITHUB_PATH
+        
+    - name: Run C# server integration tests
+      env:
+        SERVER_LANGUAGE: csharp
+        SERVER_IP: localhost
+        SERVER_PORT: 3002
+        SPACETIMEDB_CLI_PATH: /tmp/spacetimedb/bin/spacetimedb
+      run: |
+        pytest tests/integration/ -v -m "server_csharp or not server_required" --tb=short
+        
+    - name: Create C# server behavior documentation
+      if: failure()
+      run: |
+        mkdir -p docs/server-behaviors
+        cat > docs/server-behaviors/csharp-server-differences.md << 'EOF'
+        # C# Server Implementation Differences
+        
+        ## Test Results Summary
+        Generated automatically by CI/CD pipeline on $(date)
+        
+        ## Observed Differences
+        <!-- This section will be populated by CI when tests fail -->
+        
+        ## Recommendations for C# Team
+        1. Review test failures in the integration test results
+        2. Validate compatibility with blackholio-python-client protocol adapters
+        3. Consider aligning behavior with server-rust and server-python implementations
+        
+        ## Next Steps
+        - [ ] Review CI test failure logs
+        - [ ] Update C# server implementation if needed
+        - [ ] Update protocol adapters if server behavior is intentional
+        EOF
+        
+    - name: Upload C# behavior documentation
+      if: failure()
+      uses: actions/upload-artifact@v3
+      with:
+        name: csharp-server-behavior-docs
+        path: docs/server-behaviors/
+        
+    - name: Upload integration test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: integration-results-csharp
+        path: test-results/
+
+  # Job 6: Integration Tests - Go Server
+  integration-tests-go:
+    name: Integration Tests - Go Server
+    runs-on: ubuntu-latest
+    needs: [code-quality, unit-tests]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+        
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-dev.txt
+        pip install -e .
+        
+    - name: Set up SpacetimeDB CLI (Mock)
+      run: |
+        mkdir -p /tmp/spacetimedb/bin
+        echo '#!/bin/bash' > /tmp/spacetimedb/bin/spacetimedb
+        echo 'echo "Mock SpacetimeDB CLI for CI"' >> /tmp/spacetimedb/bin/spacetimedb
+        chmod +x /tmp/spacetimedb/bin/spacetimedb
+        echo "/tmp/spacetimedb/bin" >> $GITHUB_PATH
+        
+    - name: Run Go server integration tests
+      env:
+        SERVER_LANGUAGE: go
+        SERVER_IP: localhost
+        SERVER_PORT: 3003
+        SPACETIMEDB_CLI_PATH: /tmp/spacetimedb/bin/spacetimedb
+      run: |
+        pytest tests/integration/ -v -m "server_go or not server_required" --tb=short
+        
+    - name: Create Go server behavior documentation
+      if: failure()
+      run: |
+        mkdir -p docs/server-behaviors
+        cat > docs/server-behaviors/go-server-differences.md << 'EOF'
+        # Go Server Implementation Differences
+        
+        ## Test Results Summary
+        Generated automatically by CI/CD pipeline on $(date)
+        
+        ## Observed Differences
+        <!-- This section will be populated by CI when tests fail -->
+        
+        ## Recommendations for Go Team
+        1. Review test failures in the integration test results
+        2. Validate compatibility with blackholio-python-client protocol adapters
+        3. Consider aligning behavior with server-rust and server-python implementations
+        
+        ## Next Steps
+        - [ ] Review CI test failure logs
+        - [ ] Update Go server implementation if needed
+        - [ ] Update protocol adapters if server behavior is intentional
+        EOF
+        
+    - name: Upload Go behavior documentation
+      if: failure()
+      uses: actions/upload-artifact@v3
+      with:
+        name: go-server-behavior-docs
+        path: docs/server-behaviors/
+        
+    - name: Upload integration test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: integration-results-go
+        path: test-results/
+
+  # Job 7: Performance & Load Testing
+  performance-tests:
+    name: Performance & Load Tests
+    runs-on: ubuntu-latest
+    needs: [unit-tests]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-dev.txt
+        pip install -e .
+        
+    - name: Run performance tests
+      run: |
+        pytest tests/test_performance.py -v --tb=short
+        python tests/performance_runner.py --ci-mode
+        
+    - name: Run load tests
+      run: |
+        bash run_load_tests.sh --quick --ci
+        
+    - name: Upload performance results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: performance-results
+        path: |
+          tests/performance_results/
+          load_test_results/
+
+  # Job 8: Docker Testing
+  docker-tests:
+    name: Docker Compatibility Tests
+    runs-on: ubuntu-latest
+    needs: [unit-tests]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: Build Docker image
+      run: |
+        docker build -t blackholio-python-client:test .
+        
+    - name: Run Docker tests
+      run: |
+        docker-compose -f docker-compose.yml -f docker-compose.override.yml up --build --exit-code-from test-runner
+        
+    - name: Test Docker environment variables
+      run: |
+        pytest tests/test_docker_validation.py -v
+        
+    - name: Upload Docker test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: docker-test-results
+        path: docker-test-results/
+
+  # Job 9: Package Building & Validation
+  package-build:
+    name: Package Building & Validation
+    runs-on: ubuntu-latest
+    needs: [code-quality, unit-tests]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: Install build dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine wheel setuptools
+        
+    - name: Build package
+      run: |
+        python -m build
+        
+    - name: Validate package
+      run: |
+        twine check dist/*
+        
+    - name: Test package installation
+      run: |
+        pip install dist/*.whl
+        python -c "import blackholio_client; print('Package installed successfully')"
+        python -c "from blackholio_client import create_game_client; print('Main API available')"
+        
+    - name: Upload package artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: python-package
+        path: dist/
+
+  # Job 10: Final Integration & Deployment Readiness
+  deployment-readiness:
+    name: Deployment Readiness Check
+    runs-on: ubuntu-latest
+    needs: 
+      - integration-tests-rust
+      - integration-tests-python  
+      - integration-tests-csharp
+      - integration-tests-go
+      - performance-tests
+      - docker-tests
+      - package-build
+    if: always()
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download all artifacts
+      uses: actions/download-artifact@v3
+      
+    - name: Generate deployment readiness report
+      run: |
+        mkdir -p deployment-reports
+        cat > deployment-reports/readiness-report.md << 'EOF'
+        # Deployment Readiness Report
+        
+        Generated: $(date)
+        Commit: ${{ github.sha }}
+        Branch: ${{ github.ref_name }}
+        
+        ## Test Results Summary
+        
+        ### Unit Tests
+        - Status: ${{ needs.unit-tests.result }}
+        
+        ### Integration Tests
+        - Rust Server: ${{ needs.integration-tests-rust.result }}
+        - Python Server: ${{ needs.integration-tests-python.result }}
+        - C# Server: ${{ needs.integration-tests-csharp.result }}
+        - Go Server: ${{ needs.integration-tests-go.result }}
+        
+        ### Performance Tests
+        - Status: ${{ needs.performance-tests.result }}
+        
+        ### Docker Tests  
+        - Status: ${{ needs.docker-tests.result }}
+        
+        ### Package Build
+        - Status: ${{ needs.package-build.result }}
+        
+        ## Deployment Recommendations
+        
+        EOF
+        
+        # Add deployment recommendations based on test results
+        if [[ "${{ needs.integration-tests-rust.result }}" == "success" && "${{ needs.integration-tests-python.result }}" == "success" ]]; then
+          echo "✅ **READY FOR DEPLOYMENT** - Core server languages (Rust, Python) validated" >> deployment-reports/readiness-report.md
+        else
+          echo "❌ **NOT READY** - Core server validation failed" >> deployment-reports/readiness-report.md
+        fi
+        
+        if [[ "${{ needs.integration-tests-csharp.result }}" == "failure" ]]; then
+          echo "⚠️ **C# SERVER ATTENTION NEEDED** - Check generated documentation" >> deployment-reports/readiness-report.md
+        fi
+        
+        if [[ "${{ needs.integration-tests-go.result }}" == "failure" ]]; then
+          echo "⚠️ **GO SERVER ATTENTION NEEDED** - Check generated documentation" >> deployment-reports/readiness-report.md
+        fi
+        
+    - name: Upload deployment readiness report
+      uses: actions/upload-artifact@v3
+      with:
+        name: deployment-readiness-report
+        path: deployment-reports/
+        
+    - name: Comment on PR with results
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const report = fs.readFileSync('deployment-reports/readiness-report.md', 'utf8');
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `## 🚀 CI/CD Pipeline Results\n\n${report}`
+          });
+
+  # Job 11: Release on Tag (Production Deployment)
+  release:
+    name: Release Package
+    runs-on: ubuntu-latest
+    needs: [deployment-readiness]
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: Download package artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: python-package
+        path: dist/
+        
+    - name: Create GitHub Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Release ${{ github.ref }}
+        body: |
+          ## Blackholio Python Client Release
+          
+          Automated release created by CI/CD pipeline.
+          
+          ### What's Included
+          - Production-ready Python package for SpacetimeDB integration
+          - Support for all server languages: Rust, Python, C#, Go
+          - Comprehensive error handling and connection management
+          - Docker containerization support
+          - Complete API documentation
+          
+          ### Installation
+          ```bash
+          pip install git+https://github.com/${{ github.repository }}@${{ github.ref }}
+          ```
+          
+          ### Migration Guide
+          See [INSTALLATION.md](docs/INSTALLATION.md) for migration from existing implementations.
+        draft: false
+        prerelease: false
+        
+    - name: Upload release assets
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: dist/
+        asset_name: blackholio-python-client-dist.zip
+        asset_content_type: application/zip

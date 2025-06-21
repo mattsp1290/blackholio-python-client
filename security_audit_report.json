@@ -1,0 +1,571 @@
+{
+  "summary": {
+    "total_findings": 27,
+    "critical": 0,
+    "high": 1,
+    "medium": 14,
+    "low": 11,
+    "info": 1,
+    "security_score": 68.15
+  },
+  "findings_by_severity": {
+    "MEDIUM": [
+      {
+        "severity": "MEDIUM",
+        "category": "Input_Validation",
+        "file_path": "src/blackholio_client/client.py",
+        "line_number": 541,
+        "description": "File operations should validate paths",
+        "code_snippet": "with open(file_path, 'w') as f:",
+        "recommendation": "Validate file paths and use Path.resolve() to prevent directory traversal",
+        "cwe_id": "CWE-22"
+      },
+      {
+        "severity": "MEDIUM",
+        "category": "Input_Validation",
+        "file_path": "src/blackholio_client/connection/connection_manager.py",
+        "line_number": 212,
+        "description": "File operations should validate paths",
+        "code_snippet": "def is_open(self) -> bool:",
+        "recommendation": "Validate file paths and use Path.resolve() to prevent directory traversal",
+        "cwe_id": "CWE-22"
+      },
+      {
+        "severity": "MEDIUM",
+        "category": "Input_Validation",
+        "file_path": "src/blackholio_client/auth/identity_manager.py",
+        "line_number": 357,
+        "description": "File operations should validate paths",
+        "code_snippet": "with open(identity_file, 'r') as f:",
+        "recommendation": "Validate file paths and use Path.resolve() to prevent directory traversal",
+        "cwe_id": "CWE-22"
+      },
+      {
+        "severity": "MEDIUM",
+        "category": "Input_Validation",
+        "file_path": "src/blackholio_client/auth/identity_manager.py",
+        "line_number": 377,
+        "description": "File operations should validate paths",
+        "code_snippet": "with open(identity_file, 'w') as f:",
+        "recommendation": "Validate file paths and use Path.resolve() to prevent directory traversal",
+        "cwe_id": "CWE-22"
+      },
+      {
+        "severity": "MEDIUM",
+        "category": "Input_Validation",
+        "file_path": "src/blackholio_client/integration/client_loader.py",
+        "line_number": 227,
+        "description": "File operations should validate paths",
+        "code_snippet": "with open(file_path, 'r', encoding='utf-8') as f:",
+        "recommendation": "Validate file paths and use Path.resolve() to prevent directory traversal",
+        "cwe_id": "CWE-22"
+      },
+      {
+        "severity": "MEDIUM",
+        "category": "Input_Validation",
+        "file_path": "src/blackholio_client/integration/server_manager.py",
+        "line_number": 283,
+        "description": "File operations should validate paths",
+        "code_snippet": "with open(cargo_toml, 'r') as f:",
+        "recommendation": "Validate file paths and use Path.resolve() to prevent directory traversal",
+        "cwe_id": "CWE-22"
+      },
+      {
+        "severity": "MEDIUM",
+        "category": "Input_Validation",
+        "file_path": "src/blackholio_client/utils/debugging.py",
+        "line_number": 84,
+        "description": "File operations should validate paths",
+        "code_snippet": "with open(path, 'w', encoding='utf-8') as f:",
+        "recommendation": "Validate file paths and use Path.resolve() to prevent directory traversal",
+        "cwe_id": "CWE-22"
+      },
+      {
+        "severity": "MEDIUM",
+        "category": "Input_Validation",
+        "file_path": "src/blackholio_client/utils/debugging.py",
+        "line_number": 493,
+        "description": "File operations should validate paths",
+        "code_snippet": "with open(path, 'w', encoding='utf-8') as f:",
+        "recommendation": "Validate file paths and use Path.resolve() to prevent directory traversal",
+        "cwe_id": "CWE-22"
+      },
+      {
+        "severity": "MEDIUM",
+        "category": "Input_Validation",
+        "file_path": "src/blackholio_client/utils/debugging.py",
+        "line_number": 500,
+        "description": "File operations should validate paths",
+        "code_snippet": "with open(path, 'w', newline='', encoding='utf-8') as f:",
+        "recommendation": "Validate file paths and use Path.resolve() to prevent directory traversal",
+        "cwe_id": "CWE-22"
+      },
+      {
+        "severity": "MEDIUM",
+        "category": "Input_Validation",
+        "file_path": "src/blackholio_client/utils/debugging.py",
+        "line_number": 675,
+        "description": "File operations should validate paths",
+        "code_snippet": "with open(file_path, 'w', encoding='utf-8') as f:",
+        "recommendation": "Validate file paths and use Path.resolve() to prevent directory traversal",
+        "cwe_id": "CWE-22"
+      },
+      {
+        "severity": "MEDIUM",
+        "category": "Input_Validation",
+        "file_path": "src/blackholio_client/examples/advanced_usage_examples.py",
+        "line_number": 518,
+        "description": "File operations should validate paths",
+        "code_snippet": "with open(filename, 'w') as f:",
+        "recommendation": "Validate file paths and use Path.resolve() to prevent directory traversal",
+        "cwe_id": "CWE-22"
+      },
+      {
+        "severity": "MEDIUM",
+        "category": "SQL Injection",
+        "file_path": "src/blackholio_client/examples/migration_examples.py",
+        "line_number": 135,
+        "description": "Potential SQL injection via string formatting",
+        "code_snippet": "print(\"\"\"",
+        "recommendation": "Use parameterized queries",
+        "cwe_id": "CWE-89"
+      },
+      {
+        "severity": "MEDIUM",
+        "category": "SQL Injection",
+        "file_path": "src/blackholio_client/factory/client_factory.py",
+        "line_number": 109,
+        "description": "Potential SQL injection via string formatting",
+        "code_snippet": "\"\"\"Create a SpacetimeDB client connection.",
+        "recommendation": "Use parameterized queries",
+        "cwe_id": "CWE-89"
+      },
+      {
+        "severity": "MEDIUM",
+        "category": "SQL Injection",
+        "file_path": "src/blackholio_client/interfaces/reducer_interface.py",
+        "line_number": 136,
+        "description": "Potential SQL injection via string formatting",
+        "code_snippet": "\"\"\"",
+        "recommendation": "Use parameterized queries",
+        "cwe_id": "CWE-89"
+      }
+    ],
+    "LOW": [
+      {
+        "severity": "LOW",
+        "category": "Syntax",
+        "file_path": "src/blackholio_client/client.py",
+        "line_number": 0,
+        "description": "File has syntax errors",
+        "code_snippet": "",
+        "recommendation": "Fix syntax errors",
+        "cwe_id": null
+      },
+      {
+        "severity": "LOW",
+        "category": "Syntax",
+        "file_path": "src/blackholio_client/auth/identity_manager.py",
+        "line_number": 0,
+        "description": "File has syntax errors",
+        "code_snippet": "",
+        "recommendation": "Fix syntax errors",
+        "cwe_id": null
+      },
+      {
+        "severity": "LOW",
+        "category": "Syntax",
+        "file_path": "src/blackholio_client/integration/client_loader.py",
+        "line_number": 0,
+        "description": "File has syntax errors",
+        "code_snippet": "",
+        "recommendation": "Fix syntax errors",
+        "cwe_id": null
+      },
+      {
+        "severity": "LOW",
+        "category": "Syntax",
+        "file_path": "src/blackholio_client/integration/client_generator.py",
+        "line_number": 0,
+        "description": "File has syntax errors",
+        "code_snippet": "",
+        "recommendation": "Fix syntax errors",
+        "cwe_id": null
+      },
+      {
+        "severity": "LOW",
+        "category": "Syntax",
+        "file_path": "src/blackholio_client/integration/server_manager.py",
+        "line_number": 0,
+        "description": "File has syntax errors",
+        "code_snippet": "",
+        "recommendation": "Fix syntax errors",
+        "cwe_id": null
+      },
+      {
+        "severity": "LOW",
+        "category": "Crypto",
+        "file_path": "src/blackholio_client/utils/async_helpers.py",
+        "line_number": 449,
+        "description": "random.random() is not cryptographically secure",
+        "code_snippet": "delay *= (0.5 + random.random() * 0.5)",
+        "recommendation": "Review this code for security implications",
+        "cwe_id": "CWE-338"
+      },
+      {
+        "severity": "LOW",
+        "category": "Syntax",
+        "file_path": "src/blackholio_client/utils/async_helpers.py",
+        "line_number": 0,
+        "description": "File has syntax errors",
+        "code_snippet": "",
+        "recommendation": "Fix syntax errors",
+        "cwe_id": null
+      },
+      {
+        "severity": "LOW",
+        "category": "Syntax",
+        "file_path": "src/blackholio_client/utils/debugging.py",
+        "line_number": 0,
+        "description": "File has syntax errors",
+        "code_snippet": "",
+        "recommendation": "Fix syntax errors",
+        "cwe_id": null
+      },
+      {
+        "severity": "LOW",
+        "category": "Syntax",
+        "file_path": "src/blackholio_client/examples/advanced_usage_examples.py",
+        "line_number": 0,
+        "description": "File has syntax errors",
+        "code_snippet": "",
+        "recommendation": "Fix syntax errors",
+        "cwe_id": null
+      },
+      {
+        "severity": "LOW",
+        "category": "Crypto",
+        "file_path": "src/blackholio_client/examples/migration_examples.py",
+        "line_number": 187,
+        "description": "random.random() is not cryptographically secure",
+        "code_snippet": "'split': random.random() < 0.1",
+        "recommendation": "Review this code for security implications",
+        "cwe_id": "CWE-338"
+      },
+      {
+        "severity": "LOW",
+        "category": "Crypto",
+        "file_path": "src/blackholio_client/examples/migration_examples.py",
+        "line_number": 373,
+        "description": "random.random() is not cryptographically secure",
+        "code_snippet": "spacebar_pressed = random.random() < 0.2",
+        "recommendation": "Review this code for security implications",
+        "cwe_id": "CWE-338"
+      }
+    ],
+    "HIGH": [
+      {
+        "severity": "HIGH",
+        "category": "Input_Validation",
+        "file_path": "src/blackholio_client/models/serialization.py",
+        "line_number": 499,
+        "description": "pickle.load() can execute arbitrary code",
+        "code_snippet": "serializable_data = pickle.loads(data)",
+        "recommendation": "Review this code for security implications",
+        "cwe_id": "CWE-502"
+      }
+    ],
+    "INFO": [
+      {
+        "severity": "INFO",
+        "category": "Tools",
+        "file_path": "",
+        "line_number": 0,
+        "description": "Security tool 'safety' not available or failed",
+        "code_snippet": "",
+        "recommendation": "Install safety for additional security analysis",
+        "cwe_id": null
+      }
+    ],
+    "CRITICAL": []
+  },
+  "findings_by_category": {
+    "Input_Validation": 12,
+    "Syntax": 8,
+    "Crypto": 3,
+    "SQL Injection": 3,
+    "Tools": 1
+  },
+  "all_findings": [
+    {
+      "severity": "MEDIUM",
+      "category": "Input_Validation",
+      "file_path": "src/blackholio_client/client.py",
+      "line_number": 541,
+      "description": "File operations should validate paths",
+      "code_snippet": "with open(file_path, 'w') as f:",
+      "recommendation": "Validate file paths and use Path.resolve() to prevent directory traversal",
+      "cwe_id": "CWE-22"
+    },
+    {
+      "severity": "LOW",
+      "category": "Syntax",
+      "file_path": "src/blackholio_client/client.py",
+      "line_number": 0,
+      "description": "File has syntax errors",
+      "code_snippet": "",
+      "recommendation": "Fix syntax errors",
+      "cwe_id": null
+    },
+    {
+      "severity": "MEDIUM",
+      "category": "Input_Validation",
+      "file_path": "src/blackholio_client/connection/connection_manager.py",
+      "line_number": 212,
+      "description": "File operations should validate paths",
+      "code_snippet": "def is_open(self) -> bool:",
+      "recommendation": "Validate file paths and use Path.resolve() to prevent directory traversal",
+      "cwe_id": "CWE-22"
+    },
+    {
+      "severity": "MEDIUM",
+      "category": "Input_Validation",
+      "file_path": "src/blackholio_client/auth/identity_manager.py",
+      "line_number": 357,
+      "description": "File operations should validate paths",
+      "code_snippet": "with open(identity_file, 'r') as f:",
+      "recommendation": "Validate file paths and use Path.resolve() to prevent directory traversal",
+      "cwe_id": "CWE-22"
+    },
+    {
+      "severity": "MEDIUM",
+      "category": "Input_Validation",
+      "file_path": "src/blackholio_client/auth/identity_manager.py",
+      "line_number": 377,
+      "description": "File operations should validate paths",
+      "code_snippet": "with open(identity_file, 'w') as f:",
+      "recommendation": "Validate file paths and use Path.resolve() to prevent directory traversal",
+      "cwe_id": "CWE-22"
+    },
+    {
+      "severity": "LOW",
+      "category": "Syntax",
+      "file_path": "src/blackholio_client/auth/identity_manager.py",
+      "line_number": 0,
+      "description": "File has syntax errors",
+      "code_snippet": "",
+      "recommendation": "Fix syntax errors",
+      "cwe_id": null
+    },
+    {
+      "severity": "MEDIUM",
+      "category": "Input_Validation",
+      "file_path": "src/blackholio_client/integration/client_loader.py",
+      "line_number": 227,
+      "description": "File operations should validate paths",
+      "code_snippet": "with open(file_path, 'r', encoding='utf-8') as f:",
+      "recommendation": "Validate file paths and use Path.resolve() to prevent directory traversal",
+      "cwe_id": "CWE-22"
+    },
+    {
+      "severity": "LOW",
+      "category": "Syntax",
+      "file_path": "src/blackholio_client/integration/client_loader.py",
+      "line_number": 0,
+      "description": "File has syntax errors",
+      "code_snippet": "",
+      "recommendation": "Fix syntax errors",
+      "cwe_id": null
+    },
+    {
+      "severity": "LOW",
+      "category": "Syntax",
+      "file_path": "src/blackholio_client/integration/client_generator.py",
+      "line_number": 0,
+      "description": "File has syntax errors",
+      "code_snippet": "",
+      "recommendation": "Fix syntax errors",
+      "cwe_id": null
+    },
+    {
+      "severity": "MEDIUM",
+      "category": "Input_Validation",
+      "file_path": "src/blackholio_client/integration/server_manager.py",
+      "line_number": 283,
+      "description": "File operations should validate paths",
+      "code_snippet": "with open(cargo_toml, 'r') as f:",
+      "recommendation": "Validate file paths and use Path.resolve() to prevent directory traversal",
+      "cwe_id": "CWE-22"
+    },
+    {
+      "severity": "LOW",
+      "category": "Syntax",
+      "file_path": "src/blackholio_client/integration/server_manager.py",
+      "line_number": 0,
+      "description": "File has syntax errors",
+      "code_snippet": "",
+      "recommendation": "Fix syntax errors",
+      "cwe_id": null
+    },
+    {
+      "severity": "LOW",
+      "category": "Crypto",
+      "file_path": "src/blackholio_client/utils/async_helpers.py",
+      "line_number": 449,
+      "description": "random.random() is not cryptographically secure",
+      "code_snippet": "delay *= (0.5 + random.random() * 0.5)",
+      "recommendation": "Review this code for security implications",
+      "cwe_id": "CWE-338"
+    },
+    {
+      "severity": "LOW",
+      "category": "Syntax",
+      "file_path": "src/blackholio_client/utils/async_helpers.py",
+      "line_number": 0,
+      "description": "File has syntax errors",
+      "code_snippet": "",
+      "recommendation": "Fix syntax errors",
+      "cwe_id": null
+    },
+    {
+      "severity": "MEDIUM",
+      "category": "Input_Validation",
+      "file_path": "src/blackholio_client/utils/debugging.py",
+      "line_number": 84,
+      "description": "File operations should validate paths",
+      "code_snippet": "with open(path, 'w', encoding='utf-8') as f:",
+      "recommendation": "Validate file paths and use Path.resolve() to prevent directory traversal",
+      "cwe_id": "CWE-22"
+    },
+    {
+      "severity": "MEDIUM",
+      "category": "Input_Validation",
+      "file_path": "src/blackholio_client/utils/debugging.py",
+      "line_number": 493,
+      "description": "File operations should validate paths",
+      "code_snippet": "with open(path, 'w', encoding='utf-8') as f:",
+      "recommendation": "Validate file paths and use Path.resolve() to prevent directory traversal",
+      "cwe_id": "CWE-22"
+    },
+    {
+      "severity": "MEDIUM",
+      "category": "Input_Validation",
+      "file_path": "src/blackholio_client/utils/debugging.py",
+      "line_number": 500,
+      "description": "File operations should validate paths",
+      "code_snippet": "with open(path, 'w', newline='', encoding='utf-8') as f:",
+      "recommendation": "Validate file paths and use Path.resolve() to prevent directory traversal",
+      "cwe_id": "CWE-22"
+    },
+    {
+      "severity": "MEDIUM",
+      "category": "Input_Validation",
+      "file_path": "src/blackholio_client/utils/debugging.py",
+      "line_number": 675,
+      "description": "File operations should validate paths",
+      "code_snippet": "with open(file_path, 'w', encoding='utf-8') as f:",
+      "recommendation": "Validate file paths and use Path.resolve() to prevent directory traversal",
+      "cwe_id": "CWE-22"
+    },
+    {
+      "severity": "LOW",
+      "category": "Syntax",
+      "file_path": "src/blackholio_client/utils/debugging.py",
+      "line_number": 0,
+      "description": "File has syntax errors",
+      "code_snippet": "",
+      "recommendation": "Fix syntax errors",
+      "cwe_id": null
+    },
+    {
+      "severity": "HIGH",
+      "category": "Input_Validation",
+      "file_path": "src/blackholio_client/models/serialization.py",
+      "line_number": 499,
+      "description": "pickle.load() can execute arbitrary code",
+      "code_snippet": "serializable_data = pickle.loads(data)",
+      "recommendation": "Review this code for security implications",
+      "cwe_id": "CWE-502"
+    },
+    {
+      "severity": "MEDIUM",
+      "category": "Input_Validation",
+      "file_path": "src/blackholio_client/examples/advanced_usage_examples.py",
+      "line_number": 518,
+      "description": "File operations should validate paths",
+      "code_snippet": "with open(filename, 'w') as f:",
+      "recommendation": "Validate file paths and use Path.resolve() to prevent directory traversal",
+      "cwe_id": "CWE-22"
+    },
+    {
+      "severity": "LOW",
+      "category": "Syntax",
+      "file_path": "src/blackholio_client/examples/advanced_usage_examples.py",
+      "line_number": 0,
+      "description": "File has syntax errors",
+      "code_snippet": "",
+      "recommendation": "Fix syntax errors",
+      "cwe_id": null
+    },
+    {
+      "severity": "LOW",
+      "category": "Crypto",
+      "file_path": "src/blackholio_client/examples/migration_examples.py",
+      "line_number": 187,
+      "description": "random.random() is not cryptographically secure",
+      "code_snippet": "'split': random.random() < 0.1",
+      "recommendation": "Review this code for security implications",
+      "cwe_id": "CWE-338"
+    },
+    {
+      "severity": "LOW",
+      "category": "Crypto",
+      "file_path": "src/blackholio_client/examples/migration_examples.py",
+      "line_number": 373,
+      "description": "random.random() is not cryptographically secure",
+      "code_snippet": "spacebar_pressed = random.random() < 0.2",
+      "recommendation": "Review this code for security implications",
+      "cwe_id": "CWE-338"
+    },
+    {
+      "severity": "MEDIUM",
+      "category": "SQL Injection",
+      "file_path": "src/blackholio_client/examples/migration_examples.py",
+      "line_number": 135,
+      "description": "Potential SQL injection via string formatting",
+      "code_snippet": "print(\"\"\"",
+      "recommendation": "Use parameterized queries",
+      "cwe_id": "CWE-89"
+    },
+    {
+      "severity": "MEDIUM",
+      "category": "SQL Injection",
+      "file_path": "src/blackholio_client/factory/client_factory.py",
+      "line_number": 109,
+      "description": "Potential SQL injection via string formatting",
+      "code_snippet": "\"\"\"Create a SpacetimeDB client connection.",
+      "recommendation": "Use parameterized queries",
+      "cwe_id": "CWE-89"
+    },
+    {
+      "severity": "MEDIUM",
+      "category": "SQL Injection",
+      "file_path": "src/blackholio_client/interfaces/reducer_interface.py",
+      "line_number": 136,
+      "description": "Potential SQL injection via string formatting",
+      "code_snippet": "\"\"\"",
+      "recommendation": "Use parameterized queries",
+      "cwe_id": "CWE-89"
+    },
+    {
+      "severity": "INFO",
+      "category": "Tools",
+      "file_path": "",
+      "line_number": 0,
+      "description": "Security tool 'safety' not available or failed",
+      "code_snippet": "",
+      "recommendation": "Install safety for additional security analysis",
+      "cwe_id": null
+    }
+  ]
+}

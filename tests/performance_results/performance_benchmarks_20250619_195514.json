@@ -1,0 +1,17 @@
+[
+  {
+    "test_name": "game_entity_operations",
+    "operation_count": 5000,
+    "total_time": 0.009574665920808911,
+    "operations_per_second": 0.0,
+    "memory_usage_mb": 0.234375,
+    "cpu_percent": 0.0,
+    "min_time": 1.4579854905605316e-06,
+    "max_time": 4.616682417690754e-05,
+    "avg_time": 1.8600503448396922e-06,
+    "percentile_95": 2.291053533554077e-06,
+    "percentile_99": 2.3748725652694702e-06,
+    "success_rate": 0.0,
+    "additional_metrics": {}
+  }
+]

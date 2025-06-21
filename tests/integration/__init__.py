@@ -1,0 +1,1 @@
+"""Integration tests for blackholio-python-client with real SpacetimeDB servers."""

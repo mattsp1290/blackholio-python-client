@@ -1,0 +1,94 @@
+name: Dependency Updates
+
+on:
+  schedule:
+    # Run weekly on Mondays at 3 AM UTC
+    - cron: '0 3 * * 1'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  update-dependencies:
+    name: Update Dependencies
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install pip-tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install pip-tools
+        
+    - name: Check for security updates
+      run: |
+        pip install safety
+        safety check --json --output security-check.json || true
+        
+    - name: Update requirements
+      run: |
+        # Create backup
+        cp requirements-dev.txt requirements-dev.txt.backup
+        
+        # Check for updates
+        pip-compile --upgrade requirements-dev.txt
+        
+        # Show differences
+        if ! diff -q requirements-dev.txt requirements-dev.txt.backup; then
+          echo "Dependencies to update:"
+          diff requirements-dev.txt requirements-dev.txt.backup || true
+        else
+          echo "No dependency updates available"
+        fi
+        
+    - name: Test updated dependencies
+      if: success()
+      run: |
+        pip install -r requirements-dev.txt
+        pip install -e .
+        
+        # Run quick validation
+        python -c "import blackholio_client; print('✅ Package works with updated deps')"
+        pytest tests/test_core_modules.py -x --tb=short
+        
+    - name: Create Pull Request
+      if: success()
+      uses: peter-evans/create-pull-request@v5
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        commit-message: "chore: update dependencies"
+        title: "🔄 Weekly Dependency Updates"
+        body: |
+          ## Automated Dependency Updates
+          
+          This PR contains automated dependency updates checked on $(date).
+          
+          ### What's Updated
+          - Security updates applied
+          - Compatible version bumps
+          - Development dependencies refreshed
+          
+          ### Testing
+          ✅ Package imports successfully with updated dependencies
+          ✅ Core tests pass
+          
+          ### Security Check
+          See `security-check.json` for any security advisories.
+          
+          This PR was automatically created by the dependency update workflow.
+        branch: feature/dependency-updates
+        delete-branch: true
+        
+    - name: Upload security report
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: security-check
+        path: security-check.json

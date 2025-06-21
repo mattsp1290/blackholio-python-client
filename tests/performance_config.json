@@ -1,0 +1,106 @@
+{
+  "performance_targets": {
+    "vector2_operations": {
+      "min_ops_per_second": 10000,
+      "max_memory_mb": 5,
+      "min_success_rate": 0.99,
+      "description": "Vector2 mathematical operations should be highly optimized"
+    },
+    "game_entity_operations": {
+      "min_ops_per_second": 5000,
+      "max_memory_mb": 10,
+      "min_success_rate": 0.99,
+      "description": "GameEntity creation and manipulation"
+    },
+    "json_serialization": {
+      "min_ops_per_second": 1000,
+      "max_memory_mb": 20,
+      "min_success_rate": 0.99,
+      "description": "JSON serialization performance"
+    },
+    "binary_serialization": {
+      "min_ops_per_second": 1000,
+      "max_memory_mb": 15,
+      "min_success_rate": 0.99,
+      "description": "Binary serialization performance"
+    },
+    "entity_conversion": {
+      "min_ops_per_second": 2000,
+      "max_memory_mb": 15,
+      "min_success_rate": 0.99,
+      "description": "Data converter performance"
+    },
+    "connection_manager_operations": {
+      "min_ops_per_second": 1000,
+      "max_memory_mb": 25,
+      "min_success_rate": 0.95,
+      "description": "Connection manager operations"
+    },
+    "concurrent_connection_operations": {
+      "min_ops_per_second": 500,
+      "max_memory_mb": 50,
+      "min_success_rate": 0.95,
+      "description": "Connection manager under concurrent load"
+    },
+    "event_publishing": {
+      "min_ops_per_second": 5000,
+      "max_memory_mb": 20,
+      "min_success_rate": 0.99,
+      "description": "Event system publishing performance"
+    },
+    "event_subscription_handling": {
+      "min_ops_per_second": 2000,
+      "max_memory_mb": 25,
+      "min_success_rate": 0.99,
+      "description": "Event subscription and handling"
+    },
+    "data_pipeline_processing": {
+      "min_ops_per_second": 100,
+      "max_memory_mb": 30,
+      "min_success_rate": 0.99,
+      "description": "Complete data pipeline processing"
+    }
+  },
+  "test_configurations": {
+    "quick": {
+      "iterations": 500,
+      "warmup_iterations": 50,
+      "description": "Quick performance tests for development"
+    },
+    "standard": {
+      "iterations": 1000,
+      "warmup_iterations": 100,
+      "description": "Standard performance tests for CI/CD"
+    },
+    "comprehensive": {
+      "iterations": 5000,
+      "warmup_iterations": 500,
+      "description": "Comprehensive performance tests for release validation"
+    },
+    "stress": {
+      "iterations": 10000,
+      "warmup_iterations": 1000,
+      "concurrent_users": 50,
+      "operations_per_user": 200,
+      "description": "Stress testing configuration"
+    }
+  },
+  "comparison_baseline": {
+    "tolerance": 0.10,
+    "description": "10% performance degradation tolerance",
+    "critical_tests": [
+      "vector2_operations",
+      "game_entity_operations",
+      "json_serialization",
+      "connection_manager_operations"
+    ]
+  },
+  "reporting": {
+    "formats": ["json", "html", "csv"],
+    "include_system_info": true,
+    "include_memory_profiling": true,
+    "include_cpu_profiling": true,
+    "save_execution_times": true,
+    "percentiles": [50, 90, 95, 99]
+  }
+}

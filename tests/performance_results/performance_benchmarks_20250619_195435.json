@@ -1,0 +1,32 @@
+[
+  {
+    "test_name": "vector2_operations",
+    "operation_count": 10000,
+    "total_time": 0.022058125119656324,
+    "operations_per_second": 453347.6868842697,
+    "memory_usage_mb": 0.328125,
+    "cpu_percent": 0.0,
+    "min_time": 1.8328428268432617e-06,
+    "max_time": 4.316610284149647e-05,
+    "avg_time": 2.158122952096164e-06,
+    "percentile_95": 2.2919848561286926e-06,
+    "percentile_99": 2.749962732195854e-06,
+    "success_rate": 1.0,
+    "additional_metrics": {}
+  },
+  {
+    "test_name": "game_entity_operations",
+    "operation_count": 5000,
+    "total_time": 0.008670208975672722,
+    "operations_per_second": 0.0,
+    "memory_usage_mb": 0.0,
+    "cpu_percent": 99.7,
+    "min_time": 1.4170072972774506e-06,
+    "max_time": 6.02498184889555e-05,
+    "avg_time": 1.6879887785762549e-06,
+    "percentile_95": 1.834006980061531e-06,
+    "percentile_99": 2.166023477911949e-06,
+    "success_rate": 0.0,
+    "additional_metrics": {}
+  }
+]

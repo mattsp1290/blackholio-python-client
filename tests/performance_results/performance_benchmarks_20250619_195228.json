@@ -1,0 +1,17 @@
+[
+  {
+    "test_name": "vector2_operations",
+    "operation_count": 10000,
+    "total_time": 0.07223779195919633,
+    "operations_per_second": 0.0,
+    "memory_usage_mb": 0.34375,
+    "cpu_percent": 0.0,
+    "min_time": 6.041023880243301e-06,
+    "max_time": 0.0001016249880194664,
+    "avg_time": 7.109522353857756e-06,
+    "percentile_95": 7.333001121878624e-06,
+    "percentile_99": 8.95909033715725e-06,
+    "success_rate": 0.0,
+    "additional_metrics": {}
+  }
+]
