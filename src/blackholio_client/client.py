@@ -130,72 +130,106 @@ class GameClient(GameClientInterface):
             'last_activity': datetime.now()
         }
         
+        # ADD: Connection lifecycle management
+        self._active_connection: Optional[Any] = None
+        self._connection_context: Optional[Any] = None
+        self._connection_lock = asyncio.Lock()
+        self._is_connecting = False
+        
         # Configure auto-reconnect if enabled
         if self._auto_reconnect:
             self.enable_auto_reconnect()
 
     # Connection Interface Implementation
     async def connect(self, auth_token: Optional[str] = None) -> bool:
-        """Connect to the SpacetimeDB server."""
-        try:
-            self._connection_state = ConnectionState.CONNECTING
-            self._notify_connection_state_changed()
-            self._stats['connection_attempts'] += 1
+        """Connect to the SpacetimeDB server with proper context manager usage."""
+        async with self._connection_lock:
+            # Prevent duplicate connection attempts
+            if self._is_connecting:
+                while self._is_connecting:
+                    await asyncio.sleep(0.1)
+                return self.is_connected()
             
-            # Get connection from connection manager
-            connection = await self._connection_manager.get_connection(
-                server_language=self._server_language
-            )
+            if self._active_connection and self.is_connected():
+                return True  # Already connected
             
-            if connection:
-                self._connection_state = ConnectionState.CONNECTED
-                self._stats['successful_connections'] += 1
-                self._stats['last_activity'] = datetime.now()
+            try:
+                self._is_connecting = True
+                self._connection_state = ConnectionState.CONNECTING
                 self._notify_connection_state_changed()
+                self._stats['connection_attempts'] += 1
                 
-                # Authenticate if token provided
-                if auth_token:
-                    await self.authenticate({'token': auth_token})
+                # ✅ CORRECT: Use as async context manager
+                self._connection_context = self._connection_manager.get_connection(
+                    server_language=self._server_language
+                )
+                
+                # Properly enter the context manager
+                self._active_connection = await self._connection_context.__aenter__()
+                
+                if self._active_connection:
+                    self._connection_state = ConnectionState.CONNECTED
+                    self._stats['successful_connections'] += 1
+                    self._stats['last_activity'] = datetime.now()
+                    self._notify_connection_state_changed()
+                    
+                    # Authenticate if token provided
+                    if auth_token:
+                        await self.authenticate({'token': auth_token})
+                    else:
+                        self.load_token()
+                    
+                    return True
                 else:
-                    # Try to load saved token
-                    self.load_token()
-                
-                return True
-            else:
-                self._connection_state = ConnectionState.FAILED
-                self._stats['failed_connections'] += 1
-                self._notify_connection_state_changed()
+                    await self._cleanup_failed_connection()
+                    return False
+                    
+            except Exception as e:
+                logger.error(f"Connection failed: {e}")
+                await self._cleanup_failed_connection()
                 return False
-                
-        except Exception as e:
-            logger.error(f"Connection failed: {e}")
-            self._connection_state = ConnectionState.FAILED
-            self._stats['failed_connections'] += 1
-            self._notify_connection_state_changed()
-            self._notify_error(str(e))
-            return False
+            finally:
+                self._is_connecting = False
+
+    async def _cleanup_failed_connection(self):
+        """Clean up failed connection attempt."""
+        self._connection_state = ConnectionState.FAILED
+        self._stats['failed_connections'] += 1
+        self._notify_connection_state_changed()
+        
+        if self._connection_context and self._active_connection:
+            try:
+                await self._connection_context.__aexit__(None, None, None)
+            except Exception as e:
+                logger.debug(f"Error during connection cleanup: {e}")
+            finally:
+                self._active_connection = None
+                self._connection_context = None
 
     async def disconnect(self) -> None:
-        """Disconnect from the SpacetimeDB server."""
-        try:
-            self._connection_state = ConnectionState.DISCONNECTED
-            self._is_authenticated = False
-            self._is_in_game = False
-            self._local_player = None
-            
-            # Clear caches
-            self._entities.clear()
-            self._players.clear()
-            self._circles.clear()
-            
-            # Release connection
-            await self._connection_manager.release_connection(self._server_language)
-            
-            self._notify_connection_state_changed()
-            
-        except Exception as e:
-            logger.error(f"Disconnect failed: {e}")
-            self._notify_error(str(e))
+        """Disconnect from the SpacetimeDB server with proper cleanup."""
+        async with self._connection_lock:
+            try:
+                self._connection_state = ConnectionState.DISCONNECTED
+                self._is_authenticated = False
+                self._is_in_game = False
+                self._local_player = None
+                
+                # Clear caches
+                self._entities.clear()
+                self._players.clear()
+                self._circles.clear()
+                
+                # Properly exit the context manager
+                if self._connection_context and self._active_connection:
+                    await self._connection_context.__aexit__(None, None, None)
+                
+            except Exception as e:
+                logger.error(f"Error during disconnect: {e}")
+            finally:
+                self._active_connection = None
+                self._connection_context = None
+                self._notify_connection_state_changed()
 
     def is_connected(self) -> bool:
         """Check if currently connected to the server."""
@@ -447,15 +481,26 @@ class GameClient(GameClientInterface):
 
     # High-Level Game Operations
     async def join_game(self, player_name: str, auto_subscribe: bool = True) -> bool:
-        """Join the game with full initialization."""
-        if not self.is_connected():
+        """Join the game with proper connection validation."""
+        if not self._active_connection or not self.is_connected():
+            logger.error("Cannot join game: not connected to server")
             if not await self.connect():
                 return False
         
         if auto_subscribe:
             await self.subscribe_to_tables(["entity", "player", "circle", "food", "config"])
         
-        return await self.enter_game(player_name)
+        try:
+            # Use the active connection for game operations
+            # Implementation depends on the connection interface
+            success = await self.enter_game(player_name)
+            if success:
+                self._is_in_game = True
+                # Additional game state setup would go here
+            return success
+        except Exception as e:
+            logger.error(f"Failed to join game: {e}")
+            return False
 
     def is_in_game(self) -> bool:
         """Check if currently in a game."""
