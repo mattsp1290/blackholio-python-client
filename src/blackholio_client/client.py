@@ -63,6 +63,10 @@ class GameClient(GameClientInterface):
         from .config.environment import get_environment_config
         self._config = get_environment_config()
         self._config.server_language = server_language
+        
+        # Override environment default with passed database parameter
+        self._config.spacetime_db_identity = database
+        
         if ':' in host:
             host_parts = host.split(':')
             self._config.server_ip = host_parts[0]
