@@ -11,9 +11,10 @@ import logging
 import os
 import time
 from enum import Enum
+from pathlib import Path
 from typing import Dict, Any, Optional, Callable, List, Union
 import websockets
-from websockets.exceptions import ConnectionClosed, WebSocketException
+from websockets.exceptions import ConnectionClosed, WebSocketException, InvalidStatus
 from websockets.client import WebSocketClientProtocol
 
 from ..config.environment import EnvironmentConfig
@@ -24,6 +25,7 @@ from ..exceptions.connection_errors import (
     SpacetimeDBError,
     ConnectionLostError,
     TimeoutError as BlackholioTimeoutError,
+    AuthenticationError,
     create_connection_timeout_error
 )
 from .server_config import ServerConfig
@@ -55,6 +57,11 @@ class SpacetimeDBConnection:
         self.websocket: Optional[WebSocketClientProtocol] = None
         self.state = ConnectionState.DISCONNECTED
         self.protocol_handler = V112ProtocolHandler()
+        
+        # JWT Authentication state
+        self._identity = None
+        self._auth_token = None
+        self._credentials_file = Path.home() / '.spacetimedb' / 'credentials.json'
         
         # Connection state
         self._connection_lock = asyncio.Lock()
@@ -104,26 +111,26 @@ class SpacetimeDBConnection:
             self.state = ConnectionState.CONNECTING
             
             try:
+                # Try to load existing credentials
+                await self._load_credentials()
+                
                 # Build WebSocket URL
                 ws_url = self._build_websocket_url()
                 logger.info(f"Connecting to SpacetimeDB at {ws_url}")
                 
-                # Establish WebSocket connection with timeout
-                connect_task = websockets.connect(
-                    ws_url,
-                    ping_interval=self._heartbeat_interval,
-                    ping_timeout=self._heartbeat_timeout,
-                    close_timeout=10,
-                    max_size=10 * 1024 * 1024  # 10MB max message size
-                )
+                # Attempt connection with authentication
+                success = await self._connect_with_auth(ws_url)
                 
-                self.websocket = await asyncio.wait_for(
-                    connect_task,
-                    timeout=self._connection_timeout
-                )
+                if not success:
+                    self.state = ConnectionState.FAILED
+                    return False
                 
                 # Record connection time
                 self._connection_start_time = time.time()
+                
+                # Set state to connected before starting tasks
+                self.state = ConnectionState.CONNECTED
+                self._reconnect_attempts = 0
                 
                 # Start message handler and heartbeat
                 self._message_handler_task = asyncio.create_task(
@@ -138,13 +145,12 @@ class SpacetimeDBConnection:
                 # Send initial subscription request
                 await self._send_subscription_request()
                 
-                self.state = ConnectionState.CONNECTED
-                self._reconnect_attempts = 0
-                
-                logger.info("Successfully connected to SpacetimeDB")
+                identity_info = f" with identity: {self._identity}" if self._identity else ""
+                logger.info(f"Successfully connected to SpacetimeDB{identity_info}")
                 await self._trigger_event('connected', {
                     'server': self.config.language,
                     'url': ws_url,
+                    'identity': self._identity,
                     'timestamp': time.time()
                 })
                 
@@ -234,6 +240,189 @@ class SpacetimeDBConnection:
         """Build WebSocket URL based on server configuration."""
         protocol = "wss" if self.config.use_ssl else "ws"
         return f"{protocol}://{self.config.host}/v1/database/{self.config.db_identity}/subscribe"
+    
+    async def _connect_with_auth(self, url: str) -> bool:
+        """Attempt connection with JWT authentication handling."""
+        try:
+            # Prepare headers
+            headers = {}
+            if self._auth_token:
+                headers['Authorization'] = f'Bearer {self._auth_token}'
+                logger.debug("Using cached authentication token")
+            
+            # Attempt connection with SpacetimeDB subprotocol
+            subprotocols = [self.config.protocol] if self.config.protocol else None
+            
+            if headers:
+                connect_task = websockets.connect(
+                    url,
+                    subprotocols=subprotocols,
+                    additional_headers=headers,
+                    ping_interval=self._heartbeat_interval,
+                    ping_timeout=self._heartbeat_timeout,
+                    close_timeout=10,
+                    max_size=10 * 1024 * 1024  # 10MB max message size
+                )
+            else:
+                connect_task = websockets.connect(
+                    url,
+                    subprotocols=subprotocols,
+                    ping_interval=self._heartbeat_interval,
+                    ping_timeout=self._heartbeat_timeout,
+                    close_timeout=10,
+                    max_size=10 * 1024 * 1024  # 10MB max message size
+                )
+            
+            self.websocket = await asyncio.wait_for(
+                connect_task,
+                timeout=self._connection_timeout
+            )
+            
+            logger.info(f"Connected to SpacetimeDB at {url}")
+            return True
+            
+        except InvalidStatus as e:
+            # Check if this is a 400 response (authentication required)
+            status_code = getattr(e.response, 'status_code', None) if hasattr(e, 'response') else None
+            
+            if status_code == 400 or '400' in str(e):
+                # Check if this is an authentication requirement
+                headers = {}
+                if hasattr(e, 'response') and hasattr(e.response, 'headers'):
+                    headers = dict(e.response.headers)
+                
+                if 'spacetime-identity' in headers and 'spacetime-identity-token' in headers:
+                    # Authentication handshake required
+                    logger.debug("Received 400 with JWT credentials - performing authentication handshake")
+                    return await self._handle_auth_handshake(url, e)
+                else:
+                    # Different 400 error (e.g., database not found)
+                    logger.error(f"Database connection failed: {e}")
+                    raise BlackholioConnectionError(f"Database connection failed: {e}")
+            else:
+                logger.error(f"Connection failed with status {status_code or 'unknown'}")
+                raise BlackholioConnectionError(f"Connection failed with status {status_code or 'unknown'}")
+                
+        except Exception as e:
+            logger.error(f"Connection attempt failed: {e}")
+            return False
+    
+    async def _handle_auth_handshake(self, url: str, error_response: InvalidStatus) -> bool:
+        """Handle the JWT authentication handshake."""
+        try:
+            # Extract credentials from 400 response headers
+            headers = {}
+            if hasattr(error_response, 'response') and hasattr(error_response.response, 'headers'):
+                headers = dict(error_response.response.headers)
+            
+            # Log available headers for debugging
+            logger.debug(f"Available headers: {list(headers.keys())}")
+            
+            identity = headers.get('spacetime-identity')
+            token = headers.get('spacetime-identity-token')
+            
+            if not token or not identity:
+                logger.error("No authentication token in 400 response")
+                logger.debug(f"Available headers: {list(headers.keys())}")
+                raise AuthenticationError("Server requires authentication but no token provided")
+            
+            logger.debug(f"Received identity: {identity}")
+            logger.debug(f"Received token: {token[:20]}...")
+            
+            # Store credentials
+            self._identity = identity
+            self._auth_token = token
+            await self._store_credentials()
+            
+            # Retry connection with authentication and subprotocol
+            auth_headers = {'Authorization': f'Bearer {token}'}
+            subprotocols = [self.config.protocol] if self.config.protocol else None
+            
+            connect_task = websockets.connect(
+                url,
+                subprotocols=subprotocols,
+                additional_headers=auth_headers,
+                ping_interval=self._heartbeat_interval,
+                ping_timeout=self._heartbeat_timeout,
+                close_timeout=10,
+                max_size=10 * 1024 * 1024
+            )
+            
+            self.websocket = await asyncio.wait_for(
+                connect_task,
+                timeout=self._connection_timeout
+            )
+            
+            logger.info(f"Authentication successful - connected with identity: {identity}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Authentication handshake failed: {e}")
+            raise AuthenticationError(f"Authentication handshake failed: {e}")
+    
+    async def _load_credentials(self):
+        """Load stored credentials if available and not expired."""
+        if not self._credentials_file.exists():
+            logger.debug("No credential file found")
+            return
+        
+        try:
+            with open(self._credentials_file, 'r') as f:
+                data = json.load(f)
+            
+            # Create key for this host/database combination
+            key = f"{self.config.host}:{self.config.db_identity}"
+            
+            if key in data:
+                cred = data[key]
+                
+                # Check if credentials are expired (24 hour default)
+                timestamp = cred.get('timestamp', 0)
+                if time.time() - timestamp < 24 * 3600:  # 24 hours
+                    self._identity = cred.get('identity')
+                    self._auth_token = cred.get('token')
+                    logger.debug(f"Loaded credentials for {key}")
+                else:
+                    logger.debug(f"Credentials expired for {key}")
+            else:
+                logger.debug(f"No credentials found for {key}")
+                
+        except Exception as e:
+            logger.debug(f"Failed to load credentials: {e}")
+    
+    async def _store_credentials(self):
+        """Store credentials for reuse."""
+        if not self._identity or not self._auth_token:
+            return
+        
+        try:
+            # Ensure directory exists
+            self._credentials_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Load existing data
+            data = {}
+            if self._credentials_file.exists():
+                with open(self._credentials_file, 'r') as f:
+                    data = json.load(f)
+            
+            # Store credentials with key
+            key = f"{self.config.host}:{self.config.db_identity}"
+            data[key] = {
+                'identity': self._identity,
+                'token': self._auth_token,
+                'host': self.config.host,
+                'database': self.config.db_identity,
+                'timestamp': time.time()
+            }
+            
+            # Save to file
+            with open(self._credentials_file, 'w') as f:
+                json.dump(data, f, indent=2)
+            
+            logger.debug(f"Stored credentials for {key}")
+            
+        except Exception as e:
+            logger.error(f"Failed to store credentials: {e}")
     
     async def _send_subscription_request(self):
         """Send initial subscription request to SpacetimeDB."""
@@ -543,6 +732,11 @@ class SpacetimeDBConnection:
     def is_connected(self) -> bool:
         """Check if connection is active."""
         return self.state == ConnectionState.CONNECTED
+    
+    @property
+    def identity(self) -> Optional[str]:
+        """Get the current identity."""
+        return self._identity
     
     @property
     def connection_stats(self) -> Dict[str, Any]:
