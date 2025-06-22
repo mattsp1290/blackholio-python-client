@@ -633,19 +633,26 @@ class ConnectionManager:
         logger.info("Initialized connection manager")
     
     async def get_pool(self, server_language: Optional[str] = None, 
+                       database: Optional[str] = None,
                        pool_config: Optional[PoolConfiguration] = None) -> ConnectionPool:
         """
         Get or create connection pool for specified server language.
         
         Args:
             server_language: Server language (rust, python, csharp, go)
+            database: Database identity override
             pool_config: Pool configuration (uses default if None)
             
         Returns:
             ConnectionPool instance
         """
         server_config = self.env_config.get_server_config(server_language)
-        pool_key = f"{server_config.language}_{server_config.host}_{server_config.port}"
+        
+        # Override database if provided
+        if database:
+            server_config.db_identity = database
+            
+        pool_key = f"{server_config.language}_{server_config.host}_{server_config.port}_{server_config.db_identity}"
         
         async with self._lock:
             if pool_key not in self.pools:
@@ -654,24 +661,26 @@ class ConnectionManager:
                 await pool.initialize()
                 self.pools[pool_key] = pool
                 
-                logger.info(f"Created connection pool for {server_config.language} server")
+                logger.info(f"Created connection pool for {server_config.language} server with database {server_config.db_identity}")
             
             return self.pools[pool_key]
     
     @asynccontextmanager
     async def get_connection(self, server_language: Optional[str] = None,
+                           database: Optional[str] = None,
                            timeout: Optional[float] = None) -> AsyncGenerator[SpacetimeDBConnection, None]:
         """
         Get a connection for the specified server language.
         
         Args:
             server_language: Server language (rust, python, csharp, go)
+            database: Database identity override
             timeout: Connection timeout
             
         Yields:
             SpacetimeDBConnection instance
         """
-        pool = await self.get_pool(server_language)
+        pool = await self.get_pool(server_language, database=database)
         
         async with pool.get_connection(timeout) as connection:
             yield connection
@@ -753,17 +762,19 @@ def get_connection_manager() -> ConnectionManager:
 
 @asynccontextmanager
 async def get_connection(server_language: Optional[str] = None, 
+                        database: Optional[str] = None,
                         timeout: Optional[float] = None) -> AsyncGenerator[SpacetimeDBConnection, None]:
     """
     Convenience function to get a connection.
     
     Args:
         server_language: Server language (rust, python, csharp, go)
+        database: Database identity override
         timeout: Connection timeout
         
     Yields:
         SpacetimeDBConnection instance
     """
     manager = get_connection_manager()
-    async with manager.get_connection(server_language, timeout) as connection:
+    async with manager.get_connection(server_language, database, timeout) as connection:
         yield connection

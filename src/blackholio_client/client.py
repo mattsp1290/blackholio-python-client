@@ -165,7 +165,8 @@ class GameClient(GameClientInterface):
                 
                 # ✅ CORRECT: Use as async context manager
                 self._connection_context = self._connection_manager.get_connection(
-                    server_language=self._server_language
+                    server_language=self._server_language,
+                    database=self._database
                 )
                 
                 # Properly enter the context manager
