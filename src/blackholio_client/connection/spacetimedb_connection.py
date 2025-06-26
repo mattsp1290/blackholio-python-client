@@ -16,6 +16,10 @@ from typing import Dict, Any, Optional, Callable, List, Union
 import websockets
 from websockets.exceptions import ConnectionClosed, WebSocketException, InvalidStatus
 from websockets.client import WebSocketClientProtocol
+from spacetimedb_sdk.protocol_helpers import (
+    SpacetimeDBProtocolHelper,
+    get_binary_protocol_subprotocol
+)
 
 from ..config.environment import EnvironmentConfig
 from ..models.game_entities import GameEntity, GamePlayer, GameCircle, Vector2
@@ -57,6 +61,9 @@ class SpacetimeDBConnection:
         self.websocket: Optional[WebSocketClientProtocol] = None
         self.state = ConnectionState.DISCONNECTED
         self.protocol_handler = V112ProtocolHandler()
+        
+        # Initialize binary protocol helper
+        self.protocol_helper = SpacetimeDBProtocolHelper(use_binary=True)
         
         # JWT Authentication state
         self._identity = None
@@ -239,7 +246,14 @@ class SpacetimeDBConnection:
     def _build_websocket_url(self) -> str:
         """Build WebSocket URL based on server configuration."""
         protocol = "wss" if self.config.use_ssl else "ws"
-        return f"{protocol}://{self.config.host}/v1/database/{self.config.db_identity}/subscribe"
+        # Check if host already includes port
+        if ':' in self.config.host:
+            # Host already includes port, don't add it again
+            return f"{protocol}://{self.config.host}/v1/database/{self.config.db_identity}/subscribe"
+        else:
+            # Host doesn't include port, add it if available
+            port_part = f":{self.config.port}" if self.config.port else ""
+            return f"{protocol}://{self.config.host}{port_part}/v1/database/{self.config.db_identity}/subscribe"
     
     async def _connect_with_auth(self, url: str) -> bool:
         """Attempt connection with JWT authentication handling."""
@@ -250,8 +264,8 @@ class SpacetimeDBConnection:
                 headers['Authorization'] = f'Bearer {self._auth_token}'
                 logger.debug("Using cached authentication token")
             
-            # Attempt connection with SpacetimeDB subprotocol
-            subprotocols = [self.config.protocol] if self.config.protocol else None
+            # Use binary protocol subprotocol
+            subprotocols = [get_binary_protocol_subprotocol()]
             
             if headers:
                 connect_task = websockets.connect(
@@ -334,9 +348,9 @@ class SpacetimeDBConnection:
             self._auth_token = token
             await self._store_credentials()
             
-            # Retry connection with authentication and subprotocol
+            # Retry connection with authentication and binary subprotocol
             auth_headers = {'Authorization': f'Bearer {token}'}
-            subprotocols = [self.config.protocol] if self.config.protocol else None
+            subprotocols = [get_binary_protocol_subprotocol()]
             
             connect_task = websockets.connect(
                 url,
@@ -424,16 +438,47 @@ class SpacetimeDBConnection:
         except Exception as e:
             logger.error(f"Failed to store credentials: {e}")
     
-    async def _send_subscription_request(self):
-        """Send initial subscription request to SpacetimeDB."""
-        subscription_request = {
-            "protocol": self.config.protocol,
-            "database": self.config.db_identity,
-            "subscribe": ["*"]  # Subscribe to all tables
-        }
+    def _ensure_binary_message(self, message: Union[bytes, str, Any], operation: str = "message") -> bytes:
+        """
+        Ensure message is bytes for binary WebSocket frame transmission.
         
-        await self._send_message(subscription_request)
-        logger.debug("Sent subscription request")
+        Args:
+            message: The message that might be bytes, string, or other type
+            operation: Name of the operation for logging
+            
+        Returns:
+            bytes: The message as bytes
+        """
+        if isinstance(message, bytes):
+            return message
+        
+        # Log warning if SDK returned non-bytes
+        logger.warning(f"SDK {operation} returned {type(message).__name__} instead of bytes - converting to ensure binary frame")
+        
+        if hasattr(message, '__bytes__'):
+            return bytes(message)
+        elif isinstance(message, str):
+            # String would cause text frame - convert to bytes
+            logger.warning(f"CRITICAL: {operation} returned string - converting to bytes to prevent text frame")
+            return message.encode('utf-8')
+        else:
+            # Last resort - stringify and encode
+            return str(message).encode('utf-8')
+    
+    async def _send_subscription_request(self):
+        """Send initial subscription request using binary protocol."""
+        # Get tables to subscribe to
+        tables = ["entity", "player", "circle", "food", "config"]
+        
+        # Create binary subscription message
+        binary_message = self.protocol_helper.encode_subscription(tables)
+        
+        # Ensure we have bytes for binary frame transmission
+        binary_message = self._ensure_binary_message(binary_message, "encode_subscription")
+        
+        # Send as binary data - the websockets library will use binary frames for bytes
+        await self.websocket.send(binary_message)
+        logger.debug(f"Sent subscription request ({len(binary_message)} bytes)")
     
     async def _send_message(self, message: Dict[str, Any], request_id: Optional[str] = None) -> Optional[asyncio.Future]:
         """
@@ -459,10 +504,31 @@ class SpacetimeDBConnection:
             else:
                 future = None
             
-            # Serialize message
-            message_bytes = json.dumps(message).encode('utf-8')
+            # Serialize message using binary protocol based on message type
+            message_type = message.get('type', '')
             
-            # Send as text frame (SpacetimeDB uses text frames for JSON)
+            if message_type == 'heartbeat':
+                # For heartbeat, just encode as JSON bytes
+                import json
+                message_bytes = json.dumps(message).encode('utf-8')
+            elif 'reducer' in message:
+                # Use encode_reducer_call for reducer messages
+                reducer_name = message.get('reducer', '')
+                args = message.get('args', {})
+                message_bytes = self.protocol_helper.encode_reducer_call(reducer_name, args)
+            elif 'query' in message:
+                # Use encode_one_off_query for query messages
+                query = message.get('query', '')
+                message_bytes = self.protocol_helper.encode_one_off_query(query)
+            else:
+                # For other messages, encode as JSON bytes
+                import json
+                message_bytes = json.dumps(message).encode('utf-8')
+            
+            # Ensure we have bytes for binary frame transmission
+            message_bytes = self._ensure_binary_message(message_bytes, f"encode_{message_type or 'message'}")
+            
+            # Send as binary data
             await self.websocket.send(message_bytes)
             
             # Update statistics
@@ -573,7 +639,7 @@ class SpacetimeDBConnection:
     
     async def _handle_binary_message(self, data: bytes) -> Optional[Dict[str, Any]]:
         """
-        Handle binary message format.
+        Handle binary message format using SpacetimeDB protocol helper.
         
         Args:
             data: Binary message data
@@ -582,16 +648,32 @@ class SpacetimeDBConnection:
             Parsed message data or None
         """
         try:
-            # Try to decode as JSON first (some servers send JSON as binary)
+            # Try to decode using protocol helper first
+            try:
+                server_message = self.protocol_helper.decode_server_message(data)
+                
+                # Convert to dict format for processing
+                if hasattr(server_message, '__dict__'):
+                    return server_message.__dict__
+                elif hasattr(server_message, '__class__'):
+                    # Handle different message types
+                    message_type = server_message.__class__.__name__
+                    logger.debug(f"Received {message_type} message")
+                    return {'type': message_type, 'data': server_message}
+                
+            except Exception as e:
+                logger.debug(f"Failed to decode as binary protocol: {e}")
+                pass
+            
+            # Try to decode as JSON (fallback for mixed protocol servers)
             try:
                 text = data.decode('utf-8')
                 return json.loads(text)
             except (UnicodeDecodeError, json.JSONDecodeError):
                 pass
             
-            # TODO: Implement binary protocol parsing if needed
-            # For now, log and skip binary messages
-            logger.warning(f"Received binary message ({len(data)} bytes), binary protocol not implemented")
+            # Log unknown binary messages
+            logger.warning(f"Received undecodable binary message ({len(data)} bytes)")
             return None
             
         except Exception as e:
@@ -865,11 +947,16 @@ class BlackholioClient:
             True if successfully entered game
         """
         try:
-            message = {
-                "action": "enter_game",
-                "player_name": player_name
-            }
-            await self.connection._send_message(message)
+            # Use binary protocol for reducer calls
+            binary_message = self.connection.protocol_helper.encode_reducer_call(
+                "enter_game", 
+                {"player_name": player_name}
+            )
+            
+            # Ensure we have bytes for binary frame transmission
+            binary_message = self.connection._ensure_binary_message(binary_message, "encode_reducer_call(enter_game)")
+            
+            await self.connection.websocket.send(binary_message)
             logger.info(f"Requested to enter game as {player_name}")
             return True
         except Exception as e:
@@ -887,14 +974,21 @@ class BlackholioClient:
             True if input was sent successfully
         """
         try:
-            message = {
-                "action": "update_input",
-                "direction": {
-                    "x": direction.x,
-                    "y": direction.y
+            # Use binary protocol for reducer calls
+            binary_message = self.connection.protocol_helper.encode_reducer_call(
+                "update_input", 
+                {
+                    "direction": {
+                        "x": direction.x,
+                        "y": direction.y
+                    }
                 }
-            }
-            await self.connection._send_message(message)
+            )
+            
+            # Ensure we have bytes for binary frame transmission
+            binary_message = self.connection._ensure_binary_message(binary_message, "encode_reducer_call(update_input)")
+            
+            await self.connection.websocket.send(binary_message)
             return True
         except Exception as e:
             logger.error(f"Failed to update player input: {e}")
