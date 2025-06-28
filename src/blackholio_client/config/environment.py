@@ -178,7 +178,7 @@ class EnvironmentConfig:
     def get_connection_url(self) -> str:
         """Get full connection URL."""
         protocol = "wss" if self.server_use_ssl else "ws"
-        db_identity = self.spacetime_db_identity or f"blackholio_{self.server_language}"
+        db_identity = self.spacetime_db_identity or "blackholio"
         return f"{protocol}://{self.server_ip}:{self.server_port}/v1/database/{db_identity}/subscribe"
     
     def get_http_url(self) -> str:
@@ -262,8 +262,8 @@ class EnvironmentConfig:
     
     def __str__(self) -> str:
         """String representation of configuration."""
-        return (f"EnvironmentConfig(server={self.server_language}://{self.server_ip}:{self.server_port}, "
-                f"db_identity={self.spacetime_db_identity}, ssl={self.server_use_ssl})")
+        return (f"EnvironmentConfig(server={self.server_ip}:{self.server_port}, "
+                f"language={self.server_language}, db_identity={self.spacetime_db_identity}, ssl={self.server_use_ssl})")
     
     def __repr__(self) -> str:
         """Detailed string representation."""
@@ -337,7 +337,7 @@ def get_server_url() -> str:
 def get_db_identity() -> str:
     """Get database identity (legacy compatibility)."""
     config = get_environment_config()
-    return config.spacetime_db_identity or f"blackholio_{config.server_language}"
+    return config.spacetime_db_identity or "blackholio"
 
 
 def get_server_host() -> str:

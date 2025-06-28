@@ -14,7 +14,7 @@ from typing import Dict, Any, Optional
 SERVER_CONFIGS = {
     'rust': {
         'default_port': 3000,
-        'db_identity': 'blackholio_rust',
+        'db_identity': 'blackholio',
         'protocol': 'v1.json.spacetimedb',
         'description': 'Rust SpacetimeDB server implementation'
     },
