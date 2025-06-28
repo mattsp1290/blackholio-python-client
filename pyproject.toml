@@ -47,7 +47,7 @@ dependencies = [
     "jsonschema>=4.0.0",
     "python-dotenv>=0.19.0",
     # Modernized SpacetimeDB SDK (local development version)
-    "git+https://github.com/mattsp1290/spacetimedb-python-sdk.git",
+    "spacetimedb-sdk @ git+https://github.com/mattsp1290/spacetimedb-python-sdk.git",
     # "spacetimedb-sdk @ file:///Users/punk1290/git/spacetimedb-python-sdk"
 ]
 
