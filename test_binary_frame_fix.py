@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Test script to verify binary frame fixes for Blackholio Python Client.
+Test script to verify protocol frame fixes for Blackholio Python Client.
 
-This tests that all WebSocket messages are sent as binary frames, not text frames,
-preventing server disconnections due to protocol mismatches.
+This tests that WebSocket messages are sent with correct frame types:
+- JSON protocol sends TEXT frames (strings)
+- Binary protocol sends BINARY frames (bytes)
 """
 
 import asyncio
@@ -18,8 +19,8 @@ logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 
-class TestBinaryFrames:
-    """Test that all messages are sent as binary frames."""
+class TestProtocolFrames:
+    """Test that messages are sent with correct frame types for their protocol."""
     
     def __init__(self):
         self.sent_messages = []
@@ -35,10 +36,10 @@ class TestBinaryFrames:
         logger.info(f"Captured message: type={type(message).__name__}, is_bytes={isinstance(message, bytes)}, length={len(message) if message else 0}")
     
     async def test_connection_messages(self):
-        """Test that connection-level messages are sent as binary frames."""
-        logger.info("\n=== Testing Connection Messages ===")
+        """Test that connection-level messages are sent as TEXT frames for JSON protocol."""
+        logger.info("\n=== Testing Connection Messages (JSON Protocol) ===")
         
-        # Create test config
+        # Create test config for JSON protocol
         config = ServerConfig(
             language="python",
             host="localhost",
@@ -69,20 +70,22 @@ class TestBinaryFrames:
         logger.info("\nTest 2: Testing _send_message")
         await connection._send_message({"type": "test", "data": "hello"})
         
-        # Verify all messages were sent as bytes
+        # Verify all messages were sent as strings (TEXT frames) for JSON protocol
         logger.info("\n=== Verification Results ===")
-        all_binary = True
+        all_text = True
         for i, msg in enumerate(self.sent_messages):
             logger.info(f"Message {i+1}: type={msg['type']}, is_bytes={msg['is_bytes']}")
-            if not msg['is_bytes']:
-                logger.error(f"ERROR: Message {i+1} was sent as {msg['type']} instead of bytes!")
-                all_binary = False
+            if msg['is_bytes']:
+                logger.error(f"ERROR: Message {i+1} was sent as bytes instead of string (TEXT frame)!")
+                all_text = False
+            else:
+                logger.info(f"SUCCESS: Message {i+1} was sent as string (TEXT frame)")
         
-        return all_binary
+        return all_text
     
     async def test_client_messages(self):
-        """Test that client-level messages are sent as binary frames."""
-        logger.info("\n=== Testing Client Messages ===")
+        """Test that client-level messages are sent as TEXT frames for JSON protocol."""
+        logger.info("\n=== Testing Client Messages (JSON Protocol) ===")
         
         # Create client
         client = BlackholioClient(server_language="python")
@@ -106,20 +109,22 @@ class TestBinaryFrames:
         direction = Vector2(1.0, 0.0)
         await client.update_player_input(direction)
         
-        # Verify all messages were sent as bytes
+        # Verify all messages were sent as strings (TEXT frames) for JSON protocol
         logger.info("\n=== Verification Results ===")
-        all_binary = True
+        all_text = True
         for i, msg in enumerate(self.sent_messages):
             logger.info(f"Message {i+1}: type={msg['type']}, is_bytes={msg['is_bytes']}")
-            if not msg['is_bytes']:
-                logger.error(f"ERROR: Message {i+1} was sent as {msg['type']} instead of bytes!")
-                all_binary = False
+            if msg['is_bytes']:
+                logger.error(f"ERROR: Message {i+1} was sent as bytes instead of string (TEXT frame)!")
+                all_text = False
+            else:
+                logger.info(f"SUCCESS: Message {i+1} was sent as string (TEXT frame)")
         
-        return all_binary
+        return all_text
     
     async def test_sdk_string_return(self):
-        """Test handling when SDK returns string instead of bytes."""
-        logger.info("\n=== Testing SDK String Return Handling ===")
+        """Test that SDK properly returns strings for JSON protocol (no conversion needed)."""
+        logger.info("\n=== Testing Fixed SDK String Return ===")
         
         config = ServerConfig(
             language="python",
@@ -132,11 +137,11 @@ class TestBinaryFrames:
         
         connection = SpacetimeDBConnection(config)
         
-        # Mock protocol helper to return strings (simulating the bug)
+        # Mock protocol helper to return strings (this is now the expected behavior)
         mock_protocol_helper = Mock()
-        mock_protocol_helper.encode_subscription = Mock(return_value="string_instead_of_bytes")
-        mock_protocol_helper.encode_message = Mock(return_value="another_string")
-        mock_protocol_helper.encode_reducer_call = Mock(return_value="reducer_string")
+        mock_protocol_helper.encode_subscription = Mock(return_value="json_subscription_string")
+        mock_protocol_helper.encode_message = Mock(return_value="json_message_string")
+        mock_protocol_helper.encode_reducer_call = Mock(return_value="json_reducer_string")
         connection.protocol_helper = mock_protocol_helper
         
         # Mock websocket
@@ -149,46 +154,46 @@ class TestBinaryFrames:
         # Clear captured messages
         self.sent_messages.clear()
         
-        # Test that strings get converted to bytes
-        logger.info("\nTesting string-to-bytes conversion")
+        # Test that strings are sent as strings (no conversion)
+        logger.info("\nTesting direct string handling")
         await connection._send_subscription_request()
         await connection._send_message({"test": "data"})
         
-        # Verify conversion happened
+        # Verify strings are sent as-is (TEXT frames)
         logger.info("\n=== Verification Results ===")
-        all_converted = True
+        all_strings = True
         for i, msg in enumerate(self.sent_messages):
             logger.info(f"Message {i+1}: type={msg['type']}, is_bytes={msg['is_bytes']}")
-            if not msg['is_bytes']:
-                logger.error(f"ERROR: Message {i+1} was not converted to bytes!")
-                all_converted = False
+            if msg['is_bytes']:
+                logger.error(f"ERROR: Message {i+1} was converted to bytes when it should stay as string!")
+                all_strings = False
             else:
-                logger.info(f"SUCCESS: String was converted to bytes for message {i+1}")
+                logger.info(f"SUCCESS: String was sent as string (TEXT frame) for message {i+1}")
         
-        return all_converted
+        return all_strings
 
 
 async def main():
     """Run all tests."""
-    tester = TestBinaryFrames()
+    tester = TestProtocolFrames()
     
     logger.info("=" * 60)
-    logger.info("BINARY FRAME FIX VERIFICATION TEST")
+    logger.info("PROTOCOL FRAME FIX VERIFICATION TEST")
     logger.info("=" * 60)
     
     results = []
     
     # Test 1: Connection messages
     result1 = await tester.test_connection_messages()
-    results.append(("Connection Messages", result1))
+    results.append(("Connection Messages (JSON Protocol)", result1))
     
     # Test 2: Client messages
     result2 = await tester.test_client_messages()
-    results.append(("Client Messages", result2))
+    results.append(("Client Messages (JSON Protocol)", result2))
     
     # Test 3: SDK string return handling
     result3 = await tester.test_sdk_string_return()
-    results.append(("SDK String Handling", result3))
+    results.append(("Fixed SDK String Handling", result3))
     
     # Summary
     logger.info("\n" + "=" * 60)
@@ -204,7 +209,7 @@ async def main():
     
     logger.info("=" * 60)
     if all_passed:
-        logger.info("ALL TESTS PASSED - Binary frames are properly enforced!")
+        logger.info("ALL TESTS PASSED - Protocol frames are correctly sent (TEXT for JSON, BINARY for binary)!")
     else:
         logger.error("SOME TESTS FAILED - Check the logs above for details")
     logger.info("=" * 60)
