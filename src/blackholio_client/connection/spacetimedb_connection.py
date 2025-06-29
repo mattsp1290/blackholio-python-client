@@ -697,7 +697,12 @@ class SpacetimeDBConnection:
             logger.debug(f"Message data: {data}")
     
     async def _heartbeat_handler(self):
-        """Handle heartbeat/keepalive messages."""
+        """
+        Handle heartbeat/keepalive messages.
+        
+        CRITICAL: Uses WebSocket ping for keepalive, NOT custom messages.
+        SpacetimeDB protocol does not accept arbitrary JSON with "type" fields.
+        """
         try:
             while self.state == ConnectionState.CONNECTED:
                 try:
@@ -706,20 +711,18 @@ class SpacetimeDBConnection:
                     
                     # Check if connection is still alive
                     if self.websocket and self._is_websocket_open():
-                        # Send ping or heartbeat message
+                        # CRITICAL: SpacetimeDB protocol compliance
+                        # Use WebSocket ping instead of custom heartbeat messages
+                        # SpacetimeDB doesn't expect custom "type" messages - this violates protocol
                         self._last_heartbeat_time = time.time()
                         
-                        # Some SpacetimeDB implementations expect explicit heartbeat
-                        heartbeat_msg = {
-                            "type": "heartbeat",
-                            "timestamp": time.time()
-                        }
-                        
                         try:
-                            await self._send_message(heartbeat_msg)
-                            logger.debug("Sent heartbeat")
+                            await self.websocket.ping()
+                            logger.debug("Sent WebSocket ping")
                         except Exception as e:
-                            logger.warning(f"Failed to send heartbeat: {e}")
+                            logger.warning(f"Failed to send ping: {e}")
+                            # If ping fails, connection might be broken
+                            break
                     else:
                         logger.warning("WebSocket closed during heartbeat check")
                         break
@@ -763,32 +766,24 @@ class SpacetimeDBConnection:
     
     async def _send_close_frame(self):
         """
-        Send a proper WebSocket close frame before disconnecting.
+        Prepare for proper WebSocket close frame before disconnecting.
         
-        This ensures the server receives a proper close handshake rather than
-        just having the connection reset abruptly.
+        CRITICAL: Does NOT send custom application messages to SpacetimeDB.
+        SpacetimeDB protocol specification forbids arbitrary JSON with "type" fields.
+        WebSocket close frames are handled at the WebSocket protocol layer.
         """
         if not self.websocket or not self._is_websocket_open():
             return
         
         try:
-            # Send a close frame message (this is different from websocket.close())
-            # The websockets library will handle the close frame automatically when we call close(),
-            # but we can also send a final message to indicate clean shutdown
-            close_message = {
-                "type": "close",
-                "reason": "client_disconnect",
-                "timestamp": time.time()
-            }
-            
-            # Send the close message with a short timeout
-            await asyncio.wait_for(
-                self._send_message(close_message), 
-                timeout=2.0
-            )
-            
-            # Give the server a moment to process the close message
-            await asyncio.sleep(0.1)
+            # CRITICAL: SpacetimeDB protocol compliance
+            # Don't send custom close messages - SpacetimeDB doesn't expect "type" messages
+            # This violates the SpacetimeDB protocol specification and causes connection termination
+            # The WebSocket close frame sent by websocket.close() is sufficient for clean shutdown
+            if self._is_websocket_open():
+                logger.debug("WebSocket ready for clean close")
+                # Small delay to ensure any pending messages are processed
+                await asyncio.sleep(0.05)
             
         except asyncio.TimeoutError:
             logger.debug("Close frame send timed out")
