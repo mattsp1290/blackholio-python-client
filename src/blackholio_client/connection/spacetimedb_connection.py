@@ -264,8 +264,8 @@ class SpacetimeDBConnection:
                 headers['Authorization'] = f'Bearer {self._auth_token}'
                 logger.debug("Using cached authentication token")
             
-            # Use binary protocol - no subprotocol needed
-            subprotocols = []
+            # Use binary protocol - requires v1.bsatn.spacetimedb subprotocol
+            subprotocols = ["v1.bsatn.spacetimedb"]
             
             if headers:
                 connect_task = websockets.connect(
@@ -350,7 +350,7 @@ class SpacetimeDBConnection:
             
             # Retry connection with authentication and binary protocol
             auth_headers = {'Authorization': f'Bearer {token}'}
-            subprotocols = []
+            subprotocols = ["v1.bsatn.spacetimedb"]
             
             connect_task = websockets.connect(
                 url,
