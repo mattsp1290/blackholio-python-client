@@ -485,7 +485,7 @@ async def test_configuration_switching():
         os.environ['SERVER_LANGUAGE'] = config['language']
         os.environ['SERVER_IP'] = 'localhost'
         os.environ['SERVER_PORT'] = str(config['port'])
-        os.environ['SPACETIME_DB_IDENTITY'] = f"blackholio_{config['language']}"
+        os.environ['SPACETIME_DB_IDENTITY'] = f"blackholio"
         
         # Create client with new configuration
         client = create_game_client()
