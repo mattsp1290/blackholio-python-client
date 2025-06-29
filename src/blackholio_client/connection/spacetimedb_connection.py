@@ -187,38 +187,53 @@ class SpacetimeDBConnection:
             
             logger.info("Disconnecting from SpacetimeDB")
             previous_state = self.state
+            
+            # Set state to disconnecting to prevent new operations
             self.state = ConnectionState.DISCONNECTED
             
-            # Cancel all pending requests
+            # Step 1: Stop sending new messages by cancelling heartbeat first
+            if self._heartbeat_task:
+                self._heartbeat_task.cancel()
+                try:
+                    await self._heartbeat_task
+                except asyncio.CancelledError:
+                    pass
+                self._heartbeat_task = None
+            
+            # Step 2: Send proper WebSocket close frame before closing connection
+            if self.websocket and self._is_websocket_open():
+                try:
+                    # Send a proper close frame with normal closure code
+                    await self._send_close_frame()
+                    logger.debug("Sent WebSocket close frame")
+                except Exception as e:
+                    logger.warning(f"Failed to send close frame: {e}")
+            
+            # Step 3: Close WebSocket with proper timeout
+            if self.websocket:
+                try:
+                    # Use close with reason code for clean shutdown
+                    await self.websocket.close(code=1000, reason="Normal closure")
+                    logger.debug("WebSocket closed with normal closure code")
+                except Exception as e:
+                    logger.warning(f"Error during websocket close: {e}")
+                finally:
+                    self.websocket = None
+            
+            # Step 4: Cancel remaining tasks after WebSocket is closed
+            if self._message_handler_task:
+                self._message_handler_task.cancel()
+                try:
+                    await self._message_handler_task
+                except asyncio.CancelledError:
+                    pass
+                self._message_handler_task = None
+            
+            # Step 5: Cancel all pending requests
             for request_id, future in self._pending_requests.items():
                 if not future.done():
                     future.cancel()
             self._pending_requests.clear()
-            
-            # Cancel tasks
-            tasks_to_cancel = []
-            if self._message_handler_task:
-                tasks_to_cancel.append(self._message_handler_task)
-            if self._heartbeat_task:
-                tasks_to_cancel.append(self._heartbeat_task)
-            
-            for task in tasks_to_cancel:
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-            
-            self._message_handler_task = None
-            self._heartbeat_task = None
-            
-            # Close WebSocket
-            if self.websocket:
-                try:
-                    await self.websocket.close()
-                except Exception as e:
-                    logger.error(f"Error closing websocket: {e}")
-                self.websocket = None
             
             # Calculate connection duration
             duration = None
@@ -746,6 +761,40 @@ class SpacetimeDBConnection:
             # If any check fails, assume websocket is not usable
             return False
     
+    async def _send_close_frame(self):
+        """
+        Send a proper WebSocket close frame before disconnecting.
+        
+        This ensures the server receives a proper close handshake rather than
+        just having the connection reset abruptly.
+        """
+        if not self.websocket or not self._is_websocket_open():
+            return
+        
+        try:
+            # Send a close frame message (this is different from websocket.close())
+            # The websockets library will handle the close frame automatically when we call close(),
+            # but we can also send a final message to indicate clean shutdown
+            close_message = {
+                "type": "close",
+                "reason": "client_disconnect",
+                "timestamp": time.time()
+            }
+            
+            # Send the close message with a short timeout
+            await asyncio.wait_for(
+                self._send_message(close_message), 
+                timeout=2.0
+            )
+            
+            # Give the server a moment to process the close message
+            await asyncio.sleep(0.1)
+            
+        except asyncio.TimeoutError:
+            logger.debug("Close frame send timed out")
+        except Exception as e:
+            logger.debug(f"Failed to send close frame: {e}")
+    
     async def _handle_connection_error(self, error: Exception):
         """Handle connection errors with retry logic."""
         previous_state = self.state
@@ -797,7 +846,36 @@ class SpacetimeDBConnection:
         """Handle unexpected disconnection."""
         if self.state == ConnectionState.CONNECTED:
             logger.warning("Unexpected disconnection from SpacetimeDB")
+            
+            # Don't call full disconnect() as connection is already lost
+            # Just clean up internal state
             self.state = ConnectionState.DISCONNECTED
+            
+            # Cancel tasks without trying to send close frames
+            if self._heartbeat_task:
+                self._heartbeat_task.cancel()
+                try:
+                    await self._heartbeat_task
+                except asyncio.CancelledError:
+                    pass
+                self._heartbeat_task = None
+            
+            if self._message_handler_task:
+                self._message_handler_task.cancel()
+                try:
+                    await self._message_handler_task
+                except asyncio.CancelledError:
+                    pass
+                self._message_handler_task = None
+            
+            # Clear websocket reference
+            self.websocket = None
+            
+            # Cancel pending requests
+            for request_id, future in self._pending_requests.items():
+                if not future.done():
+                    future.cancel()
+            self._pending_requests.clear()
             
             error = ConnectionLostError(
                 "Connection to SpacetimeDB was lost unexpectedly",
