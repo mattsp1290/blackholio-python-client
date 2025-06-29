@@ -62,8 +62,8 @@ class SpacetimeDBConnection:
         self.state = ConnectionState.DISCONNECTED
         self.protocol_handler = V112ProtocolHandler()
         
-        # Initialize binary protocol helper
-        self.protocol_helper = SpacetimeDBProtocolHelper(use_binary=True)
+        # Initialize JSON protocol helper
+        self.protocol_helper = SpacetimeDBProtocolHelper(use_binary=False)
         
         # JWT Authentication state
         self._identity = None
@@ -264,8 +264,8 @@ class SpacetimeDBConnection:
                 headers['Authorization'] = f'Bearer {self._auth_token}'
                 logger.debug("Using cached authentication token")
             
-            # Use binary protocol - requires v1.bsatn.spacetimedb subprotocol
-            subprotocols = ["v1.bsatn.spacetimedb"]
+            # Use JSON protocol - requires v1.json.spacetimedb subprotocol
+            subprotocols = ["v1.json.spacetimedb"]
             
             if headers:
                 connect_task = websockets.connect(
@@ -348,9 +348,9 @@ class SpacetimeDBConnection:
             self._auth_token = token
             await self._store_credentials()
             
-            # Retry connection with authentication and binary protocol
+            # Retry connection with authentication and JSON protocol
             auth_headers = {'Authorization': f'Bearer {token}'}
-            subprotocols = ["v1.bsatn.spacetimedb"]
+            subprotocols = ["v1.json.spacetimedb"]
             
             connect_task = websockets.connect(
                 url,
@@ -438,52 +438,49 @@ class SpacetimeDBConnection:
         except Exception as e:
             logger.error(f"Failed to store credentials: {e}")
     
-    def _ensure_binary_message(self, message: Union[bytes, str, Any], operation: str = "message") -> bytes:
+    def _ensure_json_message(self, message: Union[bytes, str, Any], operation: str = "message") -> str:
         """
-        Ensure message is bytes for binary WebSocket frame transmission.
+        Ensure message is string for JSON WebSocket frame transmission.
         
         Args:
             message: The message that might be bytes, string, or other type
             operation: Name of the operation for logging
             
         Returns:
-            bytes: The message as bytes
-            
-        Raises:
-            TypeError: If binary protocol requires bytes but got string
+            str: The message as JSON string
         """
-        if isinstance(message, bytes):
-            logger.debug(f"Binary protocol: {operation} produced bytes ({len(message)} bytes) - will send as binary frame")
+        if isinstance(message, str):
+            logger.debug(f"JSON protocol: {operation} produced string ({len(message)} chars) - will send as text frame")
             return message
         
-        # For binary protocol, strings are not allowed as they would create text frames
-        if isinstance(message, str):
-            logger.error(f"CRITICAL: Binary protocol {operation} returned string - this will cause text frame error")
-            raise TypeError(f"Binary protocol requires bytes, got string from {operation}")
+        # For JSON protocol, convert bytes to string
+        if isinstance(message, bytes):
+            logger.debug(f"JSON protocol: {operation} returned bytes - converting to string")
+            return message.decode('utf-8')
         
-        # SDK returned unexpected type - try to convert
-        logger.warning(f"SDK {operation} returned {type(message).__name__} instead of bytes - attempting conversion")
+        # SDK returned unexpected type - try to convert to JSON
+        logger.warning(f"SDK {operation} returned {type(message).__name__} - attempting JSON conversion")
         
-        if hasattr(message, '__bytes__'):
-            return bytes(message)
-        else:
-            # This shouldn't happen with binary protocol
-            raise TypeError(f"Cannot convert {type(message).__name__} to bytes for binary protocol")
+        import json
+        try:
+            return json.dumps(message)
+        except (TypeError, ValueError) as e:
+            raise TypeError(f"Cannot convert {type(message).__name__} to JSON string: {e}")
     
     async def _send_subscription_request(self):
-        """Send initial subscription request using binary protocol."""
+        """Send initial subscription request using JSON protocol."""
         # Get tables to subscribe to
         tables = ["entity", "player", "circle", "food", "config"]
         
-        # Create binary subscription message
-        binary_message = self.protocol_helper.encode_subscription(tables)
+        # Create JSON subscription message
+        json_message = self.protocol_helper.encode_subscription(tables)
         
-        # Ensure we have bytes for binary frame transmission
-        binary_message = self._ensure_binary_message(binary_message, "encode_subscription")
+        # Ensure we have string for text frame transmission
+        json_message = self._ensure_json_message(json_message, "encode_subscription")
         
-        # Send as binary frame - websockets library sends bytes as binary frames
-        await self.websocket.send(binary_message)
-        logger.info(f"Sent binary subscription request ({len(binary_message)} bytes) - frame type: BINARY")
+        # Send as text frame - websockets library sends strings as text frames
+        await self.websocket.send(json_message)
+        logger.info(f"Sent JSON subscription request ({len(json_message)} chars) - frame type: TEXT")
     
     async def _send_message(self, message: Dict[str, Any], request_id: Optional[str] = None) -> Optional[asyncio.Future]:
         """
@@ -531,18 +528,18 @@ class SpacetimeDBConnection:
                 import json
                 message_bytes = json.dumps(message).encode('utf-8')
             
-            # Ensure we have bytes for binary frame transmission
-            message_bytes = self._ensure_binary_message(message_bytes, f"encode_{message_type or 'message'}")
+            # Ensure we have string for text frame transmission
+            message_text = self._ensure_json_message(message_bytes, f"encode_{message_type or 'message'}")
             
-            # Send as binary frame - websockets library sends bytes as binary frames
-            await self.websocket.send(message_bytes)
-            logger.debug(f"Sent {message_type or 'message'} as binary frame ({len(message_bytes)} bytes)")
+            # Send as text frame - websockets library sends strings as text frames
+            await self.websocket.send(message_text)
+            logger.debug(f"Sent {message_type or 'message'} as text frame ({len(message_text)} chars)")
             
             # Update statistics
             self._messages_sent += 1
-            self._bytes_sent += len(message_bytes)
+            self._bytes_sent += len(message_text.encode('utf-8'))
             
-            logger.debug(f"Sent message ({len(message_bytes)} bytes): {message}")
+            logger.debug(f"Sent message ({len(message_text)} chars): {message}")
             
             return future
             
@@ -962,11 +959,11 @@ class BlackholioClient:
                 {"player_name": player_name}
             )
             
-            # Ensure we have bytes for binary frame transmission
-            binary_message = self.connection._ensure_binary_message(binary_message, "encode_reducer_call(enter_game)")
+            # Ensure we have string for text frame transmission
+            json_message = self.connection._ensure_json_message(binary_message, "encode_reducer_call(enter_game)")
             
-            await self.connection.websocket.send(binary_message)
-            logger.info(f"Sent enter_game reducer as binary frame ({len(binary_message)} bytes) for player: {player_name}")
+            await self.connection.websocket.send(json_message)
+            logger.info(f"Sent enter_game reducer as text frame ({len(json_message)} chars) for player: {player_name}")
             return True
         except Exception as e:
             logger.error(f"Failed to enter game: {e}")
@@ -994,11 +991,11 @@ class BlackholioClient:
                 }
             )
             
-            # Ensure we have bytes for binary frame transmission
-            binary_message = self.connection._ensure_binary_message(binary_message, "encode_reducer_call(update_input)")
+            # Ensure we have string for text frame transmission
+            json_message = self.connection._ensure_json_message(binary_message, "encode_reducer_call(update_input)")
             
-            await self.connection.websocket.send(binary_message)
-            logger.debug(f"Sent update_input reducer as binary frame ({len(binary_message)} bytes)")
+            await self.connection.websocket.send(json_message)
+            logger.debug(f"Sent update_input reducer as text frame ({len(json_message)} chars)")
             return True
         except Exception as e:
             logger.error(f"Failed to update player input: {e}")
