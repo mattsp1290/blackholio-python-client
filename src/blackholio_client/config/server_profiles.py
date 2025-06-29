@@ -73,7 +73,7 @@ PREDEFINED_PROFILES = {
             'SERVER_LANGUAGE': 'rust',
             'SERVER_IP': 'localhost',
             'SERVER_PORT': '3000',
-            'SPACETIME_DB_IDENTITY': 'blackholio_rust',
+            'SPACETIME_DB_IDENTITY': 'blackholio',
             'DEBUG_MODE': 'true'
         },
         tags=['local', 'development', 'rust']
@@ -87,7 +87,7 @@ PREDEFINED_PROFILES = {
             'SERVER_LANGUAGE': 'python',
             'SERVER_IP': 'localhost',
             'SERVER_PORT': '3001',
-            'SPACETIME_DB_IDENTITY': 'blackholio_python',
+            'SPACETIME_DB_IDENTITY': 'blackholio',
             'DEBUG_MODE': 'true'
         },
         tags=['local', 'development', 'python']
@@ -101,7 +101,7 @@ PREDEFINED_PROFILES = {
             'SERVER_LANGUAGE': 'csharp',
             'SERVER_IP': 'localhost',
             'SERVER_PORT': '3002',
-            'SPACETIME_DB_IDENTITY': 'blackholio_csharp',
+            'SPACETIME_DB_IDENTITY': 'blackholio',
             'DEBUG_MODE': 'true'
         },
         tags=['local', 'development', 'csharp']
@@ -115,7 +115,7 @@ PREDEFINED_PROFILES = {
             'SERVER_LANGUAGE': 'go',
             'SERVER_IP': 'localhost',
             'SERVER_PORT': '3003',
-            'SPACETIME_DB_IDENTITY': 'blackholio_go',
+            'SPACETIME_DB_IDENTITY': 'blackholio',
             'DEBUG_MODE': 'true'
         },
         tags=['local', 'development', 'go']
@@ -129,7 +129,7 @@ PREDEFINED_PROFILES = {
             'SERVER_LANGUAGE': 'rust',
             'SERVER_IP': 'blackholio-rust',
             'SERVER_PORT': '3000',
-            'SPACETIME_DB_IDENTITY': 'blackholio_rust'
+            'SPACETIME_DB_IDENTITY': 'blackholio'
         },
         tags=['docker', 'containerized', 'rust']
     ),
@@ -142,7 +142,7 @@ PREDEFINED_PROFILES = {
             'SERVER_LANGUAGE': 'python',
             'SERVER_IP': 'blackholio-python',
             'SERVER_PORT': '3001',
-            'SPACETIME_DB_IDENTITY': 'blackholio_python'
+            'SPACETIME_DB_IDENTITY': 'blackholio'
         },
         tags=['docker', 'containerized', 'python']
     ),
@@ -158,7 +158,7 @@ PREDEFINED_PROFILES = {
             'SERVER_IP': 'blackholio.example.com',
             'SERVER_PORT': '443',
             'SERVER_USE_SSL': 'true',
-            'SPACETIME_DB_IDENTITY': 'blackholio_prod',
+            'SPACETIME_DB_IDENTITY': 'blackholio',
             'LOG_LEVEL': 'WARNING'
         },
         tags=['production', 'ssl', 'rust']
@@ -172,7 +172,7 @@ PREDEFINED_PROFILES = {
             'SERVER_LANGUAGE': 'rust',
             'SERVER_IP': 'test-server',
             'SERVER_PORT': '3000',
-            'SPACETIME_DB_IDENTITY': 'blackholio_test',
+            'SPACETIME_DB_IDENTITY': 'blackholio',
             'CONNECTION_TIMEOUT': '10.0',
             'RECONNECT_ATTEMPTS': '3',
             'LOG_LEVEL': 'DEBUG'

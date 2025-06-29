@@ -20,19 +20,19 @@ SERVER_CONFIGS = {
     },
     'python': {
         'default_port': 3001,
-        'db_identity': 'blackholio_python',
+        'db_identity': 'blackholio',
         'protocol': 'v1.json.spacetimedb',
         'description': 'Python SpacetimeDB server implementation'
     },
     'csharp': {
         'default_port': 3002,
-        'db_identity': 'blackholio_csharp',
+        'db_identity': 'blackholio',
         'protocol': 'v1.json.spacetimedb',
         'description': 'C# SpacetimeDB server implementation'
     },
     'go': {
         'default_port': 3003,
-        'db_identity': 'blackholio_go',
+        'db_identity': 'blackholio',
         'protocol': 'v1.json.spacetimedb',
         'description': 'Go SpacetimeDB server implementation'
     }
