@@ -690,7 +690,7 @@ class SpacetimeDBConnection:
                     await asyncio.sleep(self._heartbeat_interval)
                     
                     # Check if connection is still alive
-                    if self.websocket and not self.websocket.closed:
+                    if self.websocket and self._is_websocket_open():
                         # Send ping or heartbeat message
                         self._last_heartbeat_time = time.time()
                         
@@ -719,6 +719,32 @@ class SpacetimeDBConnection:
             logger.error(f"Fatal error in heartbeat handler: {e}")
         finally:
             logger.debug("Heartbeat handler stopped")
+    
+    def _is_websocket_open(self) -> bool:
+        """
+        Safely check if websocket is open and available.
+        
+        Returns:
+            True if websocket is open and ready for communication
+        """
+        if not self.websocket:
+            return False
+        
+        try:
+            # Check various websocket state indicators
+            if hasattr(self.websocket, 'closed'):
+                return not self.websocket.closed
+            elif hasattr(self.websocket, 'close_code'):
+                return self.websocket.close_code is None
+            elif hasattr(self.websocket, 'state'):
+                # For some websocket implementations
+                return str(self.websocket.state).lower() in ('open', 'connected')
+            else:
+                # Fallback: assume open if we have a websocket object
+                return True
+        except Exception:
+            # If any check fails, assume websocket is not usable
+            return False
     
     async def _handle_connection_error(self, error: Exception):
         """Handle connection errors with retry logic."""
