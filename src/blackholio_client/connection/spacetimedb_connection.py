@@ -20,6 +20,22 @@ from spacetimedb_sdk.protocol_helpers import (
     SpacetimeDBProtocolHelper,
     get_json_protocol_subprotocol
 )
+# Import protocol validation from the enhanced SDK
+SDK_VALIDATION_AVAILABLE = False
+validate_protocol_version = None
+check_protocol_compatibility = None
+ProtocolDecoder = None
+
+try:
+    from spacetimedb_sdk.protocol import (
+        validate_protocol_version, 
+        check_protocol_compatibility,
+        ProtocolDecoder
+    )
+    SDK_VALIDATION_AVAILABLE = True
+except ImportError:
+    # Fallback for older SDK versions
+    pass
 
 from ..config.environment import EnvironmentConfig
 from ..models.game_entities import GameEntity, GamePlayer, GameCircle, Vector2
@@ -62,8 +78,18 @@ class SpacetimeDBConnection:
         self.state = ConnectionState.DISCONNECTED
         self.protocol_handler = V112ProtocolHandler()
         
-        # Initialize JSON protocol helper
+        # Initialize JSON protocol helper with validation
         self.protocol_helper = SpacetimeDBProtocolHelper(use_binary=False)
+        
+        # Enhanced protocol decoder for better message type recognition
+        if SDK_VALIDATION_AVAILABLE:
+            self.protocol_decoder = ProtocolDecoder(use_binary=False)
+        else:
+            self.protocol_decoder = None
+            
+        # Protocol validation state
+        self._protocol_validated = False
+        self._protocol_version = "v1.json.spacetimedb"
         
         # JWT Authentication state
         self._identity = None
@@ -100,6 +126,8 @@ class SpacetimeDBConnection:
         self._bytes_received = 0
         
         logger.info(f"Initialized SpacetimeDB connection for {config.language} server at {config.host}")
+        if not SDK_VALIDATION_AVAILABLE:
+            logger.warning("Enhanced SDK protocol validation not available - using basic validation")
     
     async def connect(self) -> bool:
         """
@@ -279,8 +307,13 @@ class SpacetimeDBConnection:
                 headers['Authorization'] = f'Bearer {self._auth_token}'
                 logger.debug("Using cached authentication token")
             
+            # Validate protocol configuration first
+            if SDK_VALIDATION_AVAILABLE and not validate_protocol_version(self._protocol_version):
+                logger.warning(f"Unsupported protocol version: {self._protocol_version}")
+                
             # Use JSON protocol - requires v1.json.spacetimedb subprotocol
             subprotocols = ["v1.json.spacetimedb"]
+            logger.debug(f"Requesting subprotocol: {subprotocols[0]}")
             
             if headers:
                 connect_task = websockets.connect(
@@ -307,7 +340,15 @@ class SpacetimeDBConnection:
                 timeout=self._connection_timeout
             )
             
+            # Validate negotiated protocol
+            negotiated_protocol = getattr(self.websocket, 'subprotocol', None)
+            if negotiated_protocol:
+                logger.info(f"Connected with protocol: {negotiated_protocol}")
+                if negotiated_protocol != "v1.json.spacetimedb":
+                    logger.warning(f"Protocol mismatch - requested JSON but got: {negotiated_protocol}")
+                    
             logger.info(f"Connected to SpacetimeDB at {url}")
+            self._protocol_validated = True
             return True
             
         except InvalidStatus as e:
@@ -583,24 +624,24 @@ class SpacetimeDBConnection:
             raise SpacetimeDBError(f"Request '{message_type}' failed: {e}")
     
     async def _message_handler(self):
-        """Handle incoming messages from SpacetimeDB with binary/text support."""
+        """Handle incoming messages from SpacetimeDB with enhanced protocol validation."""
         try:
             async for message in self.websocket:
                 try:
                     # Update statistics
                     self._messages_received += 1
                     
-                    # Handle different message types
+                    # Enhanced frame type validation
                     if isinstance(message, bytes):
-                        # Binary message - this is expected with binary protocol
+                        # Binary message - should NOT happen with JSON protocol
                         self._bytes_received += len(message)
-                        logger.debug(f"Received BINARY frame ({len(message)} bytes) - parsing with binary protocol")
+                        logger.warning(f"Received BINARY frame with v1.json.spacetimedb protocol - this may indicate protocol mismatch")
                         data = await self._handle_binary_message(message)
                     elif isinstance(message, str):
-                        # Text message - this should NOT happen with binary protocol
+                        # Text message - this is expected with JSON protocol
                         self._bytes_received += len(message.encode('utf-8'))
-                        logger.warning(f"Received TEXT frame with binary protocol - this may indicate protocol mismatch")
-                        data = json.loads(message)
+                        logger.debug(f"Received TEXT frame ({len(message)} chars) - parsing with JSON protocol")
+                        data = await self._handle_text_message(message)
                     else:
                         logger.warning(f"Unknown message type: {type(message)}")
                         continue
@@ -666,8 +707,64 @@ class SpacetimeDBConnection:
             logger.error(f"Error handling binary message: {e}")
             return None
     
+    async def _handle_text_message(self, message: str) -> Optional[Dict[str, Any]]:
+        """
+        Handle text message format using enhanced SDK decoder.
+        
+        Args:
+            message: Text message data
+            
+        Returns:
+            Parsed message data or None
+        """
+        try:
+            # Use enhanced decoder if available
+            if self.protocol_decoder and SDK_VALIDATION_AVAILABLE:
+                try:
+                    server_message = self.protocol_decoder.decode_server_message(message.encode('utf-8'))
+                    
+                    # Convert to dict format for processing
+                    if hasattr(server_message, '__dict__'):
+                        return server_message.__dict__
+                    elif hasattr(server_message, '__class__'):
+                        message_type = server_message.__class__.__name__
+                        logger.debug(f"Decoded {message_type} message with enhanced decoder")
+                        return {'type': message_type, 'data': server_message}
+                        
+                except Exception as e:
+                    logger.debug(f"Enhanced decoder failed, falling back to JSON: {e}")
+            
+            # Fallback to JSON parsing
+            data = json.loads(message)
+            
+            # Check for unknown message types and provide enhanced logging
+            if isinstance(data, dict):
+                unknown_keys = []
+                known_message_types = {
+                    'IdentityToken', 'InitialSubscription', 'TransactionUpdate',
+                    'subscription_applied', 'transaction_update', 'identity_token'
+                }
+                
+                for key in data.keys():
+                    if key not in known_message_types and key.capitalize() in {'IdentityToken', 'InitialSubscription', 'TransactionUpdate'}:
+                        unknown_keys.append(key)
+                
+                if unknown_keys:
+                    logger.warning(f"Unknown message type in data: {{{', '.join([f"'{k}': {{...}}" for k in unknown_keys])}}}")
+                    logger.debug(f"Full message data: {data}")
+            
+            return data
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to decode text message as JSON: {e}")
+            logger.debug(f"Problematic message: {message[:200]}...")
+            return None
+        except Exception as e:
+            logger.error(f"Error handling text message: {e}")
+            return None
+    
     async def _process_message(self, data: Dict[str, Any]):
-        """Process incoming message using protocol handler with request correlation."""
+        """Process incoming message using enhanced protocol handler with improved message type recognition."""
         try:
             # Check for request response
             request_id = data.get('request_id')
@@ -684,13 +781,41 @@ class SpacetimeDBConnection:
                         future.set_result(data.get('result', data))
                 return
             
-            # Process with protocol handler
-            processed_data = self.protocol_handler.process_message(data)
+            # Enhanced message type recognition
+            message_type = None
+            processed_data = None
             
-            if processed_data:
-                message_type = processed_data.get('type')
-                if message_type:
-                    await self._trigger_event(message_type, processed_data)
+            # Handle known SpacetimeDB message types
+            if 'IdentityToken' in data:
+                message_type = 'identity_token'
+                processed_data = {'type': message_type, 'identity_token': data['IdentityToken']}
+                logger.debug(f"Recognized IdentityToken message: {data['IdentityToken'][:20]}...")
+                
+            elif 'InitialSubscription' in data:
+                message_type = 'initial_subscription'
+                processed_data = {'type': message_type, 'subscription_data': data['InitialSubscription']}
+                logger.debug("Recognized InitialSubscription message")
+                
+            elif 'TransactionUpdate' in data:
+                message_type = 'transaction_update'
+                processed_data = {'type': message_type, 'update_data': data['TransactionUpdate']}
+                logger.debug("Recognized TransactionUpdate message")
+                
+            else:
+                # Fall back to protocol handler for other message types
+                processed_data = self.protocol_handler.process_message(data)
+                if processed_data:
+                    message_type = processed_data.get('type')
+            
+            # Trigger events if we have processed data
+            if processed_data and message_type:
+                await self._trigger_event(message_type, processed_data)
+            elif data:
+                # Log unrecognized message but don't fail completely
+                logger.info(f"Received unrecognized message format: {list(data.keys())[:5]}")
+                logger.debug(f"Full unrecognized message: {data}")
+                # Try to trigger a generic message event
+                await self._trigger_event('raw_message', {'type': 'raw_message', 'data': data})
                     
         except Exception as e:
             logger.error(f"Failed to process message: {e}")
@@ -925,15 +1050,61 @@ class SpacetimeDBConnection:
         """
         start_time = time.time()
         
-        while time.time() - start_time < timeout:
+        while True:
+            # Check current state
             if self.state == ConnectionState.CONNECTED:
                 return True
             elif self.state == ConnectionState.FAILED:
                 return False
             
+            # Check timeout BEFORE sleeping to prevent infinite loops
+            elapsed = time.time() - start_time
+            if elapsed >= timeout:
+                logger.warning(f"Connection timeout reached after {elapsed:.1f}s")
+                return False
+            
+            # Sleep for a short interval
             await asyncio.sleep(0.1)
+    
+    def enable_protocol_debugging(self) -> None:
+        """
+        Enable enhanced protocol debugging to help identify protocol issues.
+        This will log detailed information about frame types and protocol mismatches.
+        """
+        logger.info("Protocol debugging enabled - will log frame type validation warnings")
         
-        return False
+        # Set logging level to DEBUG for this specific logger
+        current_logger = logging.getLogger(__name__)
+        current_logger.setLevel(logging.DEBUG)
+        
+        # Log current protocol configuration
+        logger.info(f"Current protocol version: {self._protocol_version}")
+        logger.info(f"Protocol validated: {self._protocol_validated}")
+        logger.info(f"Enhanced SDK validation available: {SDK_VALIDATION_AVAILABLE}")
+        
+        if self.websocket:
+            negotiated_protocol = getattr(self.websocket, 'subprotocol', 'unknown')
+            logger.info(f"Negotiated WebSocket subprotocol: {negotiated_protocol}")
+    
+    def get_protocol_info(self) -> Dict[str, Any]:
+        """
+        Get current protocol configuration and validation status.
+        
+        Returns:
+            Dictionary with protocol information
+        """
+        negotiated_protocol = None
+        if self.websocket:
+            negotiated_protocol = getattr(self.websocket, 'subprotocol', None)
+            
+        return {
+            'protocol_version': self._protocol_version,
+            'protocol_validated': self._protocol_validated,
+            'negotiated_protocol': negotiated_protocol,
+            'sdk_validation_available': SDK_VALIDATION_AVAILABLE,
+            'connection_state': self.state.value,
+            'use_binary': self.protocol_helper.use_binary if hasattr(self.protocol_helper, 'use_binary') else False
+        }
     
     def on(self, event: str, callback: Callable):
         """Register event callback."""
@@ -1100,6 +1271,14 @@ class BlackholioClient:
     def on(self, event: str, callback: Callable):
         """Register event callback (delegates to connection)."""
         self.connection.on(event, callback)
+    
+    def enable_protocol_debugging(self) -> None:
+        """Enable protocol debugging for troubleshooting connection issues."""
+        self.connection.enable_protocol_debugging()
+    
+    def get_protocol_info(self) -> Dict[str, Any]:
+        """Get protocol information for debugging."""
+        return self.connection.get_protocol_info()
     
     @property
     def is_connected(self) -> bool:
