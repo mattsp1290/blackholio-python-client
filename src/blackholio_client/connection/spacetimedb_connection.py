@@ -635,7 +635,10 @@ class SpacetimeDBConnection:
                     if isinstance(message, bytes):
                         # Binary message - should NOT happen with JSON protocol
                         self._bytes_received += len(message)
-                        logger.warning(f"Received BINARY frame with v1.json.spacetimedb protocol - this may indicate protocol mismatch")
+                        if self._protocol_version == "v1.json.spacetimedb":
+                            logger.error("Protocol mismatch: negotiated JSON but received binary frame")
+                            logger.debug(f"Binary frame length: {len(message)} bytes")
+                            # Still try to handle it for robustness, but log the inconsistency
                         data = await self._handle_binary_message(message)
                     elif isinstance(message, str):
                         # Text message - this is expected with JSON protocol

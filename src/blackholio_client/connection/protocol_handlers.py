@@ -63,10 +63,13 @@ class V112ProtocolHandler(ProtocolHandler):
         self.protocol_version = "v1.1.2"
         self.message_handlers = {
             'TransactionUpdate': self._handle_transaction_update,
+            'TransactionCommit': self._handle_transaction_commit,
             'SubscriptionUpdate': self._handle_subscription_update,
+            'DatabaseUpdate': self._handle_database_update,
             'Error': self._handle_error,
             'Connected': self._handle_connected,
             'Disconnected': self._handle_disconnected,
+            'IdentityToken': self._handle_identity_token,
         }
         
         logger.debug(f"Initialized {self.protocol_version} protocol handler")
@@ -120,6 +123,18 @@ class V112ProtocolHandler(ProtocolHandler):
         for field in type_fields:
             if field in data:
                 return data[field]
+        
+        # Handle transaction commit responses
+        if 'status' in data and 'timestamp' in data and 'caller_identity' in data:
+            return 'TransactionCommit'
+        
+        # Handle identity token responses
+        if 'identity' in data and 'token' in data and 'connection_id' in data:
+            return 'IdentityToken'
+        
+        # Handle database update responses
+        if 'database_update' in data and 'request_id' in data:
+            return 'DatabaseUpdate'
         
         # Check for specific v1.1.2 patterns
         if 'transaction_update' in data:
@@ -236,6 +251,34 @@ class V112ProtocolHandler(ProtocolHandler):
             'type': 'disconnected',
             'reason': data.get('reason', 'Unknown'),
             'timestamp': data.get('timestamp')
+        }
+    
+    def _handle_transaction_commit(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle transaction commit response"""
+        return {
+            'type': 'TransactionCommit',
+            'status': data.get('status'),
+            'timestamp': data.get('timestamp'),
+            'energy_used': data.get('energy_quanta_used'),
+            'execution_duration': data.get('total_host_execution_duration')
+        }
+
+    def _handle_database_update(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle database update response"""
+        return {
+            'type': 'DatabaseUpdate',
+            'tables': data.get('database_update', {}).get('tables', []),
+            'request_id': data.get('request_id'),
+            'execution_duration': data.get('total_host_execution_duration')
+        }
+
+    def _handle_identity_token(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle identity token response"""
+        return {
+            'type': 'IdentityToken',
+            'identity': data.get('identity'),
+            'token': data.get('token'),
+            'connection_id': data.get('connection_id')
         }
     
     def _handle_unknown_message(self, data: Dict[str, Any]) -> Dict[str, Any]:
