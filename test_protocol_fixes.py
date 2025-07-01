@@ -8,6 +8,7 @@ type recognition features.
 
 import asyncio
 import json
+import logging
 import pytest
 from unittest.mock import Mock, patch, AsyncMock, MagicMock
 from src.blackholio_client.connection.spacetimedb_connection import (

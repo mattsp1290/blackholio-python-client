@@ -81,11 +81,19 @@ class V112ProtocolHandler(ProtocolHandler):
         Consolidates message processing logic from both existing implementations.
         """
         try:
+            # Debug: Log object types for troubleshooting
+            if 'database_update' in data:
+                db_update = data['database_update']
+                logger.debug(f"DatabaseUpdate type: {type(db_update)}, attrs: {dir(db_update)}")
+            
             # Determine message type
             message_type = self._get_message_type(data)
             
             if not message_type:
-                logger.warning(f"Unknown message type in data: {data}")
+                # Enhanced debugging for unknown messages
+                logger.warning(f"Unknown message type in data keys: {list(data.keys())}")
+                for key, value in data.items():
+                    logger.debug(f"  {key}: {type(value)} = {str(value)[:100]}...")
                 return None
             
             # Process with appropriate handler
@@ -95,9 +103,13 @@ class V112ProtocolHandler(ProtocolHandler):
                 logger.warning(f"No handler for message type: {message_type}")
                 return self._handle_unknown_message(data)
                 
+        except AttributeError as e:
+            logger.error(f"AttributeError in message processing: {e}")
+            logger.debug(f"Data structure: {data}")
+            return None
         except Exception as e:
             logger.error(f"Error processing v1.1.2 message: {e}")
-            logger.debug(f"Problematic message data: {data}")
+            logger.debug(f"Full data: {data}")
             return None
     
     def format_outgoing_message(self, message_type: str, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -114,6 +126,30 @@ class V112ProtocolHandler(ProtocolHandler):
         base_message.update(data)
         
         return base_message
+    
+    def _safe_extract(self, obj, attr_name, default=None):
+        """Safely extract attribute from object or dict"""
+        if obj is None:
+            return default
+        
+        # Try attribute access first (for objects)
+        if hasattr(obj, attr_name):
+            return getattr(obj, attr_name)
+        
+        # Fall back to dict access
+        if isinstance(obj, dict):
+            return obj.get(attr_name, default)
+        
+        return default
+
+    def _extract_nested_value(self, obj, path, default=None):
+        """Extract nested values like obj.nanos.micros"""
+        current = obj
+        for part in path:
+            current = self._safe_extract(current, part)
+            if current is None:
+                return default
+        return current
     
     def _get_message_type(self, data: Dict[str, Any]) -> Optional[str]:
         """Extract message type from incoming data."""
@@ -208,13 +244,43 @@ class V112ProtocolHandler(ProtocolHandler):
     def _handle_subscription_update(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Handle subscription update messages."""
         try:
-            subscription_data = data.get('subscription_update', data)
+            # Handle case where data might be a SubscriptionUpdate object
+            if hasattr(data, '__class__') and 'Subscription' in data.__class__.__name__:
+                return {
+                    'type': 'subscription_update',
+                    'status': getattr(data, 'status', 'unknown'),
+                    'tables': getattr(data, 'tables', []),
+                    'timestamp': getattr(data, 'timestamp', None)
+                }
+            elif isinstance(data, dict) and 'data' in data:
+                # Handle wrapped object case
+                sub_obj = data.get('data')
+                if hasattr(sub_obj, 'status'):
+                    return {
+                        'type': 'subscription_update',
+                        'status': getattr(sub_obj, 'status', 'unknown'),
+                        'tables': getattr(sub_obj, 'tables', []),
+                        'timestamp': getattr(sub_obj, 'timestamp', None)
+                    }
             
+            # Original dictionary handling
+            if isinstance(data, dict):
+                subscription_data = data.get('subscription_update', data)
+                
+                return {
+                    'type': 'subscription_update',
+                    'status': subscription_data.get('status', 'unknown') if isinstance(subscription_data, dict) else 'unknown',
+                    'tables': subscription_data.get('tables', []) if isinstance(subscription_data, dict) else [],
+                    'timestamp': data.get('timestamp')
+                }
+            
+            # Fallback for unexpected data types
+            logger.warning(f"Unexpected data type in _handle_subscription_update: {type(data)}")
             return {
                 'type': 'subscription_update',
-                'status': subscription_data.get('status', 'unknown'),
-                'tables': subscription_data.get('tables', []),
-                'timestamp': data.get('timestamp')
+                'status': 'unknown',
+                'tables': [],
+                'timestamp': None
             }
             
         except Exception as e:
@@ -227,68 +293,259 @@ class V112ProtocolHandler(ProtocolHandler):
     
     def _handle_error(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Handle error messages."""
-        error_data = data.get('error', data)
+        # Handle case where data might be an Error object
+        if hasattr(data, '__class__') and 'Error' in data.__class__.__name__:
+            # data is an Error object directly
+            return {
+                'type': 'error',
+                'message': getattr(data, 'message', 'Unknown error'),
+                'code': getattr(data, 'code', None),
+                'details': getattr(data, 'details', None),
+                'timestamp': getattr(data, 'timestamp', None)
+            }
         
+        # Original dictionary handling
+        if isinstance(data, dict):
+            error_data = data.get('error', data)
+            
+            return {
+                'type': 'error',
+                'message': error_data.get('message', 'Unknown error') if isinstance(error_data, dict) else str(error_data),
+                'code': error_data.get('code') if isinstance(error_data, dict) else None,
+                'details': error_data.get('details') if isinstance(error_data, dict) else None,
+                'timestamp': data.get('timestamp')
+            }
+        
+        # Fallback for unexpected data types
+        logger.warning(f"Unexpected data type in _handle_error: {type(data)}")
         return {
             'type': 'error',
-            'message': error_data.get('message', 'Unknown error'),
-            'code': error_data.get('code'),
-            'details': error_data.get('details'),
-            'timestamp': data.get('timestamp')
+            'message': str(data),
+            'code': None,
+            'details': None,
+            'timestamp': None
         }
     
     def _handle_connected(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Handle connection confirmation messages."""
+        # Handle case where data might be a Connected object
+        if hasattr(data, '__class__') and 'Connected' in data.__class__.__name__:
+            return {
+                'type': 'connected',
+                'status': getattr(data, 'status', 'connected'),
+                'timestamp': getattr(data, 'timestamp', None)
+            }
+        
+        # Original dictionary handling
+        if isinstance(data, dict):
+            return {
+                'type': 'connected',
+                'status': data.get('status', 'connected'),
+                'timestamp': data.get('timestamp')
+            }
+        
+        # Fallback for unexpected data types
         return {
             'type': 'connected',
-            'status': data.get('status', 'connected'),
-            'timestamp': data.get('timestamp')
+            'status': 'connected',
+            'timestamp': None
         }
     
     def _handle_disconnected(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Handle disconnection messages."""
+        # Handle case where data might be a Disconnected object
+        if hasattr(data, '__class__') and 'Disconnected' in data.__class__.__name__:
+            return {
+                'type': 'disconnected',
+                'reason': getattr(data, 'reason', 'Unknown'),
+                'timestamp': getattr(data, 'timestamp', None)
+            }
+        
+        # Original dictionary handling
+        if isinstance(data, dict):
+            return {
+                'type': 'disconnected',
+                'reason': data.get('reason', 'Unknown'),
+                'timestamp': data.get('timestamp')
+            }
+        
+        # Fallback for unexpected data types
         return {
             'type': 'disconnected',
-            'reason': data.get('reason', 'Unknown'),
-            'timestamp': data.get('timestamp')
+            'reason': 'Unknown',
+            'timestamp': None
         }
     
     def _handle_transaction_commit(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Handle transaction commit response"""
-        return {
-            'type': 'TransactionCommit',
-            'status': data.get('status'),
-            'timestamp': data.get('timestamp'),
-            'energy_used': data.get('energy_quanta_used'),
-            'execution_duration': data.get('total_host_execution_duration')
-        }
+        # Handle case where data might be a TransactionCommit object
+        if hasattr(data, '__class__') and 'TransactionCommit' in data.__class__.__name__:
+            # data is a TransactionCommit object directly
+            return {
+                'type': 'TransactionCommit',
+                'status': getattr(data, 'status', None),
+                'timestamp': getattr(data, 'timestamp', None),
+                'energy_used': getattr(data, 'energy_quanta_used', None),
+                'execution_duration': getattr(data, 'total_host_execution_duration', None)
+            }
+        elif isinstance(data, dict) and 'data' in data:
+            # Handle wrapped object case
+            commit_obj = data.get('data')
+            if hasattr(commit_obj, 'status'):
+                return {
+                    'type': 'TransactionCommit',
+                    'status': getattr(commit_obj, 'status', None),
+                    'timestamp': getattr(commit_obj, 'timestamp', None),
+                    'energy_used': getattr(commit_obj, 'energy_quanta_used', None),
+                    'execution_duration': getattr(commit_obj, 'total_host_execution_duration', None)
+                }
+        
+        # Original dictionary handling
+        elif isinstance(data, dict):
+            return {
+                'type': 'TransactionCommit',
+                'status': data.get('status'),
+                'timestamp': data.get('timestamp'),
+                'energy_used': data.get('energy_quanta_used'),
+                'execution_duration': data.get('total_host_execution_duration')
+            }
+        
+        # Fallback for unexpected data types
+        else:
+            logger.warning(f"Unexpected data type in _handle_transaction_commit: {type(data)}")
+            return {
+                'type': 'TransactionCommit',
+                'status': None,
+                'timestamp': None,
+                'energy_used': None,
+                'execution_duration': None
+            }
 
     def _handle_database_update(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Handle database update response"""
-        return {
-            'type': 'DatabaseUpdate',
-            'tables': data.get('database_update', {}).get('tables', []),
-            'request_id': data.get('request_id'),
-            'execution_duration': data.get('total_host_execution_duration')
-        }
+        # Handle case where data itself is a DatabaseUpdate object
+        if hasattr(data, '__class__') and 'DatabaseUpdate' in data.__class__.__name__:
+            # data is a DatabaseUpdate object directly
+            return {
+                'type': 'DatabaseUpdate',
+                'tables': getattr(data, 'tables', []),
+                'request_id': getattr(data, 'request_id', None),
+                'execution_duration': getattr(data, 'total_host_execution_duration', None)
+            }
+        
+        # Handle case where data might contain a DatabaseUpdate object
+        elif isinstance(data, dict) and 'data' in data:
+            # This happens when the message decoder returns {'type': 'DatabaseUpdate', 'data': <DatabaseUpdate object>}
+            database_update_obj = data.get('data')
+            if hasattr(database_update_obj, 'tables'):
+                # Handle as object with attributes
+                return {
+                    'type': 'DatabaseUpdate',
+                    'tables': getattr(database_update_obj, 'tables', []),
+                    'request_id': getattr(database_update_obj, 'request_id', None),
+                    'execution_duration': getattr(database_update_obj, 'total_host_execution_duration', None)
+                }
+        
+        # Handle case where data contains database_update object (common pattern)
+        elif isinstance(data, dict) and 'database_update' in data:
+            database_update = data['database_update']
+            
+            # Check if database_update is an object
+            if hasattr(database_update, 'tables'):
+                tables = getattr(database_update, 'tables', [])
+            elif isinstance(database_update, dict):
+                tables = database_update.get('tables', [])
+            else:
+                tables = []
+            
+            # Extract request_id from main data dict
+            request_id = self._safe_extract(data, 'request_id')
+            
+            # Extract execution duration from main data dict
+            execution_duration = self._safe_extract(data, 'total_host_execution_duration')
+            
+            return {
+                'type': 'DatabaseUpdate',
+                'tables': tables,
+                'request_id': request_id,
+                'execution_duration': execution_duration
+            }
+        
+        # Original handling for dictionary format
+        elif isinstance(data, dict):
+            return {
+                'type': 'DatabaseUpdate',
+                'tables': [],
+                'request_id': data.get('request_id'),
+                'execution_duration': data.get('total_host_execution_duration')
+            }
+        
+        # Fallback for unexpected data types
+        else:
+            logger.warning(f"Unexpected data type in _handle_database_update: {type(data)}")
+            return {
+                'type': 'DatabaseUpdate',
+                'tables': [],
+                'request_id': None,
+                'execution_duration': None
+            }
 
     def _handle_identity_token(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Handle identity token response"""
-        return {
-            'type': 'IdentityToken',
-            'identity': data.get('identity'),
-            'token': data.get('token'),
-            'connection_id': data.get('connection_id')
-        }
+        # Handle case where data might be an IdentityToken object
+        if hasattr(data, '__class__') and 'IdentityToken' in data.__class__.__name__:
+            # data is an IdentityToken object directly
+            return {
+                'type': 'IdentityToken',
+                'identity': getattr(data, 'identity', None),
+                'token': getattr(data, 'token', None),
+                'connection_id': getattr(data, 'connection_id', None)
+            }
+        elif isinstance(data, dict) and 'data' in data:
+            # Handle wrapped object case
+            token_obj = data.get('data')
+            if hasattr(token_obj, 'identity'):
+                return {
+                    'type': 'IdentityToken',
+                    'identity': getattr(token_obj, 'identity', None),
+                    'token': getattr(token_obj, 'token', None),
+                    'connection_id': getattr(token_obj, 'connection_id', None)
+                }
+        
+        # Original dictionary handling
+        elif isinstance(data, dict):
+            return {
+                'type': 'IdentityToken',
+                'identity': data.get('identity'),
+                'token': data.get('token'),
+                'connection_id': data.get('connection_id')
+            }
+        
+        # Fallback for unexpected data types
+        else:
+            logger.warning(f"Unexpected data type in _handle_identity_token: {type(data)}")
+            return {
+                'type': 'IdentityToken',
+                'identity': None,
+                'token': None,
+                'connection_id': None
+            }
     
     def _handle_unknown_message(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Handle unknown message types."""
         logger.warning(f"Received unknown message type: {data}")
         
+        # Handle objects by getting timestamp via getattr if needed
+        timestamp = None
+        if isinstance(data, dict):
+            timestamp = data.get('timestamp')
+        elif hasattr(data, 'timestamp'):
+            timestamp = getattr(data, 'timestamp', None)
+        
         return {
             'type': 'unknown',
             'raw_data': data,
-            'timestamp': data.get('timestamp')
+            'timestamp': timestamp
         }
     
     def _extract_entities(self, table_data: Dict[str, Any]) -> List[Dict[str, Any]]:
