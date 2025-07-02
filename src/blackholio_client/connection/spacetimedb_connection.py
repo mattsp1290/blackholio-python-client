@@ -552,12 +552,36 @@ class SpacetimeDBConnection:
         # Get tables to subscribe to
         tables = ["entity", "player", "circle", "food", "config"]
         
-        # Create JSON subscription message - SDK now returns string for JSON protocol
-        json_message = self.protocol_helper.encode_subscription(tables)
-        
-        # Send as text frame - websockets library sends strings as text frames
-        await self.websocket.send(json_message)
-        logger.info(f"Sent JSON subscription request ({len(json_message)} chars) - frame type: TEXT")
+        # CRITICAL FIX: Ensure proper frame type based on negotiated protocol
+        if self._protocol_version == "v1.json.spacetimedb":
+            # For JSON protocol, we must send TEXT frames (strings)
+            json_message = self.protocol_helper.encode_subscription(tables)
+            
+            # CRITICAL: Force string type for TEXT frame transmission
+            if isinstance(json_message, bytes):
+                # SDK returned bytes, convert to string for TEXT frame
+                json_message = json_message.decode('utf-8')
+                logger.debug("Converted bytes to string for JSON protocol TEXT frame")
+            elif not isinstance(json_message, str):
+                # SDK returned something else, convert to JSON string
+                import json
+                json_message = json.dumps(json_message)
+                logger.debug("Converted object to JSON string for TEXT frame")
+            
+            # Send as TEXT frame - only strings are sent as TEXT frames
+            await self.websocket.send(json_message)
+            logger.info(f"Sent JSON subscription request as TEXT frame ({len(json_message)} chars)")
+            
+        else:
+            # For binary protocol, send BINARY frames
+            binary_message = self.protocol_helper.encode_subscription(tables)
+            
+            # Ensure bytes for BINARY frame transmission
+            if isinstance(binary_message, str):
+                binary_message = binary_message.encode('utf-8')
+                
+            await self.websocket.send(binary_message)
+            logger.info(f"Sent binary subscription request as BINARY frame ({len(binary_message)} bytes)")
     
     async def _send_message(self, message: Dict[str, Any], request_id: Optional[str] = None) -> Optional[asyncio.Future]:
         """
@@ -605,9 +629,24 @@ class SpacetimeDBConnection:
                 import json
                 message_data = json.dumps(message)
             
-            # Send message - protocol helper returns appropriate type for frame transmission
-            await self.websocket.send(message_data)
-            logger.debug(f"Sent {message_type or 'message'} as text frame ({len(str(message_data))} chars)")
+            # CRITICAL FIX: Send message with correct frame type based on protocol
+            if self._protocol_version == "v1.json.spacetimedb":
+                # JSON protocol requires TEXT frames (strings)
+                if isinstance(message_data, bytes):
+                    message_data = message_data.decode('utf-8')
+                elif not isinstance(message_data, str):
+                    import json
+                    message_data = json.dumps(message_data)
+                
+                await self.websocket.send(message_data)  # TEXT frame
+                logger.debug(f"Sent {message_type or 'message'} as TEXT frame ({len(message_data)} chars)")
+            else:
+                # Binary protocol requires BINARY frames (bytes)
+                if isinstance(message_data, str):
+                    message_data = message_data.encode('utf-8')
+                    
+                await self.websocket.send(message_data)  # BINARY frame
+                logger.debug(f"Sent {message_type or 'message'} as BINARY frame ({len(message_data)} bytes)")
             
             # Update statistics
             self._messages_sent += 1
@@ -845,12 +884,20 @@ class SpacetimeDBConnection:
             if 'IdentityToken' in data:
                 message_type = 'identity_token'
                 processed_data = {'type': message_type, 'identity_token': data['IdentityToken']}
-                logger.debug(f"Recognized IdentityToken message: {data['IdentityToken'][:20]}...")
+                # Safe string representation for logging
+                identity_str = str(data['IdentityToken'])
+                logger.debug(f"Recognized IdentityToken message: {identity_str[:20]}...")
                 
             elif 'InitialSubscription' in data:
                 message_type = 'initial_subscription'
                 processed_data = {'type': message_type, 'subscription_data': data['InitialSubscription']}
                 logger.debug("Recognized InitialSubscription message")
+                
+                # CRITICAL: Store the subscription data for later retrieval
+                # This solves the timing issue where events are fired before handlers are registered
+                self._last_initial_subscription = data['InitialSubscription']
+                logger.info(f"💾 Stored InitialSubscription data for later processing ({len(str(data['InitialSubscription']))} chars)")
+                
                 # Mark that we're receiving subscription data
                 self.on_subscription_data(data)
                 
@@ -869,6 +916,7 @@ class SpacetimeDBConnection:
             
             # Trigger events if we have processed data
             if processed_data and message_type:
+                logger.info(f"🔥 About to trigger event '{message_type}' with data keys: {list(processed_data.keys()) if isinstance(processed_data, dict) else type(processed_data)}")
                 # Check if this is a subscription-related message
                 if message_type in ('subscription_update', 'initial_subscription', 'transaction_update'):
                     self.on_subscription_data(processed_data)
@@ -1219,15 +1267,19 @@ class SpacetimeDBConnection:
     
     async def _trigger_event(self, event: str, data: Any = None):
         """Trigger event callbacks."""
+        logger.info(f"🚀 Triggering event '{event}' with {len(self._event_callbacks.get(event, []))} callbacks")
         if event in self._event_callbacks:
             for callback in self._event_callbacks[event]:
                 try:
+                    logger.debug(f"Calling callback for event '{event}'")
                     if asyncio.iscoroutinefunction(callback):
                         await callback(data)
                     else:
                         callback(data)
                 except Exception as e:
                     logger.error(f"Error in event callback for {event}: {e}")
+        else:
+            logger.debug(f"No callbacks registered for event '{event}'")
 
 
 class BlackholioClient:

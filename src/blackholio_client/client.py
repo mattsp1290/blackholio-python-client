@@ -143,6 +143,9 @@ class GameClient(GameClientInterface):
         # Configure auto-reconnect if enabled
         if self._auto_reconnect:
             self.enable_auto_reconnect()
+            
+        # Set up connection event handlers for data synchronization
+        self._setup_connection_event_handlers()
 
     # Connection Interface Implementation
     async def connect(self, auth_token: Optional[str] = None) -> bool:
@@ -177,6 +180,13 @@ class GameClient(GameClientInterface):
                     self._stats['successful_connections'] += 1
                     self._stats['last_activity'] = datetime.now()
                     self._notify_connection_state_changed()
+                    
+                    # Set up event handlers for future messages
+                    self._bridge_connection_events()
+                    
+                    # CRITICAL FIX: Process any subscription data that was already received
+                    # This handles the timing issue where InitialSubscription arrives before handlers are set up
+                    await self._process_existing_subscription_data()
                     
                     # Authenticate if token provided
                     if auth_token:
@@ -562,6 +572,101 @@ class GameClient(GameClientInterface):
         """Enable debug logging for troubleshooting."""
         logging.getLogger(__name__).setLevel(getattr(logging, level.upper()))
 
+    async def debug_full_client_state(self) -> None:
+        """Comprehensive debugging of client state."""
+        print("=== CLIENT DEBUGGING ===")
+        
+        # Connection state
+        await self.debug_connection_state()
+        
+        # Subscription setup
+        await self.debug_subscription_setup() 
+        
+        # Table access testing
+        await self.debug_table_access()
+        
+        # Data format debugging
+        await self.debug_data_format()
+        
+        print("=== END DEBUGGING ===")
+
+    async def debug_connection_state(self) -> None:
+        """Debug connection state."""
+        print(f"Connected to database: {self._database}")
+        print(f"Connection state: {self._connection_state}")
+        print(f"Is authenticated: {self._is_authenticated}")
+        print(f"Is in game: {self._is_in_game}")
+        print(f"Active connection: {self._active_connection is not None}")
+        if self._active_connection:
+            print(f"Connection type: {type(self._active_connection)}")
+
+    async def debug_subscription_setup(self) -> None:
+        """Debug subscription setup."""
+        print(f"Subscribed tables: {self._subscribed_tables}")
+        print(f"Subscription states: {self._subscription_states}")
+        print(f"Subscription state count: {len(self._subscription_states)}")
+
+    async def debug_table_access(self) -> None:
+        """Debug what tables we can actually access."""
+        tables_to_test = ['player', 'entity', 'circle', 'food', 'config']
+        
+        for table in tables_to_test:
+            try:
+                # Method 1: Check client method access
+                if table == 'player':
+                    players = self.get_all_players()
+                    print(f"get_all_players(): {len(players)} found")
+                    if len(players) > 0:
+                        print(f"Sample player: {list(players.values())[0]}")
+                        
+                elif table == 'entity':
+                    entities = self.get_all_entities()  
+                    print(f"get_all_entities(): {len(entities)} found")
+                    if len(entities) > 0:
+                        print(f"Sample entity: {list(entities.values())[0]}")
+                        
+                # Method 2: Check raw cache data
+                if table == 'player':
+                    print(f"Raw _players cache: {len(self._players)} items")
+                    if self._players:
+                        print(f"_players keys: {list(self._players.keys())}")
+                elif table == 'entity':
+                    print(f"Raw _entities cache: {len(self._entities)} items")
+                    if self._entities:
+                        print(f"_entities keys: {list(self._entities.keys())}")
+                        
+            except Exception as e:
+                print(f"Table {table} access failed: {e}")
+                import traceback
+                traceback.print_exc()
+
+    async def debug_data_format(self) -> None:
+        """Debug the format of received data."""
+        # Check if we have any connection to get data from
+        if not self._active_connection:
+            print("No active connection to check data flow")
+            return
+            
+        # Check cache state
+        print(f"Entities cache: {len(self._entities)} items")
+        print(f"Players cache: {len(self._players)} items")
+        print(f"Circles cache: {len(self._circles)} items")
+        
+        # Check if connection manager has any data
+        if hasattr(self._active_connection, 'get_entities'):
+            try:
+                conn_entities = self._active_connection.get_entities()
+                print(f"Connection entities: {len(conn_entities)} items")
+            except Exception as e:
+                print(f"Could not get entities from connection: {e}")
+                
+        if hasattr(self._active_connection, 'get_players'):
+            try:
+                conn_players = self._active_connection.get_players()
+                print(f"Connection players: {len(conn_players)} items")
+            except Exception as e:
+                print(f"Could not get players from connection: {e}")
+
     def get_debug_info(self) -> Dict[str, Any]:
         """Get comprehensive debug information."""
         return {
@@ -595,6 +700,267 @@ class GameClient(GameClientInterface):
         except Exception as e:
             logger.error(f"Failed to export state: {e}")
             return False
+
+    def _setup_connection_event_handlers(self) -> None:
+        """Set up event handlers to bridge connection data to client state."""
+        # Note: This will be called during connect() when we have an active connection
+        pass
+    
+    def _setup_early_event_handlers(self, connection) -> None:
+        """Set up event handlers before connection processes messages."""
+        try:
+            logger.info(f"🚀 Setting up EARLY event handlers on {type(connection)}")
+            
+            # Register handlers for subscription data
+            connection.on('initial_subscription', self._handle_initial_subscription_data)
+            connection.on('transaction_update', self._handle_transaction_update_data)
+            connection.on('identity_token', self._debug_event_handler)
+            connection.on('raw_message', self._debug_event_handler)
+            
+            # Verify registration
+            if hasattr(connection, '_event_callbacks'):
+                logger.info(f"🎯 Early event callbacks registered: {list(connection._event_callbacks.keys())}")
+                for event, callbacks in connection._event_callbacks.items():
+                    logger.info(f"🎯   {event}: {len(callbacks)} callbacks")
+            
+        except Exception as e:
+            logger.error(f"Failed to set up early event handlers: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    async def _process_existing_subscription_data(self) -> None:
+        """Process any subscription data that was already received during connection setup."""
+        try:
+            if not self._active_connection:
+                return
+                
+            logger.info("🔄 Checking for existing subscription data to process...")
+            
+            # Check if the connection has any cached subscription data
+            # This is a workaround for the timing issue where InitialSubscription
+            # arrives before our event handlers are registered
+            
+            # Option 1: If connection has stored InitialSubscription data
+            if hasattr(self._active_connection, '_last_initial_subscription'):
+                logger.info("📦 Found stored InitialSubscription data, processing...")
+                await self._handle_initial_subscription_data({
+                    'subscription_data': self._active_connection._last_initial_subscription
+                })
+            
+            # Option 2: Try to access SpacetimeDB tables directly via connection
+            # This is a fallback to get initial state even if we missed the subscription message
+            elif hasattr(self._active_connection, 'get_entities') and hasattr(self._active_connection, 'get_players'):
+                logger.info("📊 Attempting to get initial state directly from connection...")
+                try:
+                    entities = self._active_connection.get_entities()
+                    players = self._active_connection.get_players()
+                    
+                    logger.info(f"📊 Direct connection access: {len(entities)} entities, {len(players)} players")
+                    
+                    # Manually populate caches if we got data
+                    for entity in entities.values():
+                        self._entities[entity.entity_id] = entity
+                    for player in players.values():
+                        self._players[player.player_id] = player
+                        
+                except Exception as e:
+                    logger.debug(f"Direct connection access failed: {e}")
+            
+            logger.info(f"🔄 After processing existing data: {len(self._players)} players, {len(self._entities)} entities")
+            
+        except Exception as e:
+            logger.error(f"Error processing existing subscription data: {e}")
+    
+    def _bridge_connection_events(self) -> None:
+        """Bridge events from the active connection to populate client state."""
+        if not self._active_connection:
+            logger.warning("No active connection to bridge events from")
+            return
+            
+        # Set up event handlers on the actual connection object
+        if hasattr(self._active_connection, 'on'):
+            # Handle subscription data updates
+            logger.info(f"🔧 Registering event handler for 'initial_subscription'")
+            self._active_connection.on('initial_subscription', self._handle_initial_subscription_data)
+            
+            logger.info(f"🔧 Registering event handler for 'transaction_update'")
+            self._active_connection.on('transaction_update', self._handle_transaction_update_data)
+            
+            # Add debug handlers to see what events are being triggered
+            logger.info(f"🔧 Registering event handler for 'identity_token'")
+            self._active_connection.on('identity_token', self._debug_event_handler)
+            
+            logger.info(f"🔧 Registering event handler for 'raw_message'")
+            self._active_connection.on('raw_message', self._debug_event_handler)
+            
+            # Verify callbacks were registered
+            if hasattr(self._active_connection, '_event_callbacks'):
+                logger.info(f"🔍 Event callbacks after registration: {list(self._active_connection._event_callbacks.keys())}")
+                for event, callbacks in self._active_connection._event_callbacks.items():
+                    logger.info(f"🔍   {event}: {len(callbacks)} callbacks")
+            
+            logger.debug("Set up connection event handlers for data bridging")
+        else:
+            logger.warning(f"Active connection {type(self._active_connection)} does not support event handling")
+    
+    async def _debug_event_handler(self, data: Any) -> None:
+        """Debug handler to see what events are being triggered."""
+        logger.info(f"🔍 Event triggered: {type(data)} - {str(data)[:100]}...")
+    
+    async def _handle_initial_subscription_data(self, data: Dict[str, Any]) -> None:
+        """Handle initial subscription data from connection."""
+        try:
+            logger.info("🎯 Processing initial subscription data")
+            subscription_data = data.get('subscription_data', {})
+            
+            # Process database_update if present
+            if 'database_update' in subscription_data:
+                db_update = subscription_data['database_update']
+                await self._process_database_update(db_update)
+                
+        except Exception as e:
+            logger.error(f"Error handling initial subscription data: {e}")
+    
+    async def _handle_transaction_update_data(self, data: Dict[str, Any]) -> None:
+        """Handle transaction update data from connection."""
+        try:
+            logger.debug("Processing transaction update data")
+            update_data = data.get('update_data', {})
+            
+            # Process database_update if present
+            if 'database_update' in update_data:
+                db_update = update_data['database_update']
+                await self._process_database_update(db_update)
+                
+        except Exception as e:
+            logger.error(f"Error handling transaction update data: {e}")
+    
+    async def _process_database_update(self, db_update: Dict[str, Any]) -> None:
+        """Process database update and populate client caches."""
+        try:
+            # Process table updates
+            tables = db_update.get('tables', [])
+            
+            for table_update in tables:
+                table_name = table_update.get('table_name', '').lower()
+                
+                # Process inserts
+                for insert in table_update.get('inserts', []):
+                    await self._process_table_insert(table_name, insert)
+                
+                # Process updates  
+                for update in table_update.get('updates', []):
+                    await self._process_table_update(table_name, update)
+                
+                # Process deletes
+                for delete in table_update.get('deletes', []):
+                    await self._process_table_delete(table_name, delete)
+                    
+            logger.debug(f"Processed database update - Players: {len(self._players)}, Entities: {len(self._entities)}")
+                    
+        except Exception as e:
+            logger.error(f"Error processing database update: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    async def _process_table_insert(self, table_name: str, row_data: Dict[str, Any]) -> None:
+        """Process table insert and update client cache."""
+        try:
+            if table_name in ['player', 'players']:
+                # Create GamePlayer object
+                player = GamePlayer.from_dict(row_data)
+                self._players[player.player_id] = player
+                logger.debug(f"Added player {player.player_id} to cache")
+                
+                # Trigger callback
+                for callback in self._callbacks['player_joined']:
+                    try:
+                        callback(player)
+                    except Exception as e:
+                        logger.error(f"Error in player_joined callback: {e}")
+                        
+            elif table_name in ['entity', 'entities']:
+                # Create GameEntity object
+                entity = GameEntity.from_dict(row_data)
+                self._entities[entity.entity_id] = entity
+                logger.debug(f"Added entity {entity.entity_id} to cache")
+                
+                # Trigger callback
+                for callback in self._callbacks['entity_created']:
+                    try:
+                        callback(entity)
+                    except Exception as e:
+                        logger.error(f"Error in entity_created callback: {e}")
+                        
+            elif table_name in ['circle', 'circles']:
+                # Create GameCircle object
+                circle = GameCircle.from_dict(row_data)
+                self._circles[circle.circle_id] = circle
+                logger.debug(f"Added circle {circle.circle_id} to cache")
+                
+        except Exception as e:
+            logger.error(f"Error processing {table_name} insert: {e}")
+    
+    async def _process_table_update(self, table_name: str, update_data: Dict[str, Any]) -> None:
+        """Process table update and update client cache."""
+        try:
+            # Similar to insert but for updates
+            if table_name in ['player', 'players']:
+                player = GamePlayer.from_dict(update_data)
+                old_player = self._players.get(player.player_id)
+                self._players[player.player_id] = player
+                
+                # Trigger callback with old and new
+                for callback in self._callbacks.get('player_updated', []):
+                    try:
+                        callback(old_player, player)
+                    except Exception as e:
+                        logger.error(f"Error in player_updated callback: {e}")
+                        
+            elif table_name in ['entity', 'entities']:
+                entity = GameEntity.from_dict(update_data)
+                old_entity = self._entities.get(entity.entity_id)
+                self._entities[entity.entity_id] = entity
+                
+                # Trigger callback
+                for callback in self._callbacks['entity_updated']:
+                    try:
+                        callback(old_entity, entity)
+                    except Exception as e:
+                        logger.error(f"Error in entity_updated callback: {e}")
+                        
+        except Exception as e:
+            logger.error(f"Error processing {table_name} update: {e}")
+    
+    async def _process_table_delete(self, table_name: str, delete_data: Dict[str, Any]) -> None:
+        """Process table delete and remove from client cache."""
+        try:
+            if table_name in ['player', 'players']:
+                player_id = delete_data.get('player_id')
+                if player_id and player_id in self._players:
+                    player = self._players.pop(player_id)
+                    
+                    # Trigger callback
+                    for callback in self._callbacks['player_left']:
+                        try:
+                            callback(player)
+                        except Exception as e:
+                            logger.error(f"Error in player_left callback: {e}")
+                            
+            elif table_name in ['entity', 'entities']:
+                entity_id = delete_data.get('entity_id')
+                if entity_id and entity_id in self._entities:
+                    entity = self._entities.pop(entity_id)
+                    
+                    # Trigger callback
+                    for callback in self._callbacks['entity_destroyed']:
+                        try:
+                            callback(entity)
+                        except Exception as e:
+                            logger.error(f"Error in entity_destroyed callback: {e}")
+                            
+        except Exception as e:
+            logger.error(f"Error processing {table_name} delete: {e}")
 
     # Event notification helpers
     def _notify_connection_state_changed(self) -> None:
