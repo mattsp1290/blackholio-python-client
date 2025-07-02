@@ -881,7 +881,39 @@ class SpacetimeDBConnection:
             message_type = None
             processed_data = None
             
-            # Handle known SpacetimeDB message types
+            # First check if this is a typed message (has 'type' field)
+            if 'type' in data:
+                # Handle messages with explicit type field
+                msg_type = data['type']
+                logger.info(f"🔥 About to trigger event '{msg_type}' with data keys: {list(data.keys())}")
+                
+                if msg_type == 'IdentityToken':
+                    # Store identity information
+                    if 'identity' in data:
+                        self._identity = data['identity']
+                    if 'token' in data:
+                        self._auth_token = data['token']
+                    # Trigger the event directly with the original data
+                    await self._trigger_event(msg_type, data)
+                    return
+                    
+                elif msg_type == 'DatabaseUpdate':
+                    # This is likely the initial subscription data
+                    if 'tables' in data:
+                        # Store as initial subscription for later processing
+                        self._last_initial_subscription = data
+                        logger.info(f"💾 Stored DatabaseUpdate as InitialSubscription data")
+                        self.on_subscription_data(data)
+                    # Trigger both DatabaseUpdate and InitialSubscription events
+                    await self._trigger_event(msg_type, data)
+                    await self._trigger_event('InitialSubscription', data)
+                    return
+                else:
+                    # For other typed messages, trigger directly
+                    await self._trigger_event(msg_type, data)
+                    return
+            
+            # Handle known SpacetimeDB message types (original format)
             if 'IdentityToken' in data:
                 message_type = 'identity_token'
                 processed_data = {'type': message_type, 'identity_token': data['IdentityToken']}
@@ -1268,19 +1300,48 @@ class SpacetimeDBConnection:
     
     async def _trigger_event(self, event: str, data: Any = None):
         """Trigger event callbacks."""
-        logger.info(f"🚀 Triggering event '{event}' with {len(self._event_callbacks.get(event, []))} callbacks")
-        if event in self._event_callbacks:
-            for callback in self._event_callbacks[event]:
-                try:
-                    logger.debug(f"Calling callback for event '{event}'")
-                    if asyncio.iscoroutinefunction(callback):
-                        await callback(data)
-                    else:
-                        callback(data)
-                except Exception as e:
-                    logger.error(f"Error in event callback for {event}: {e}")
-        else:
-            logger.debug(f"No callbacks registered for event '{event}'")
+        # Map of PascalCase to lowercase event names
+        event_mapping = {
+            'IdentityToken': 'identity_token',
+            'InitialSubscription': 'initial_subscription',
+            'TransactionUpdate': 'transaction_update',
+            'DatabaseUpdate': 'database_update',
+            'Connected': 'connected',
+            'Disconnected': 'disconnected'
+        }
+        
+        # Check both the original event name and the mapped name
+        events_to_trigger = [event]
+        
+        # If this is a PascalCase event, also trigger the lowercase version
+        if event in event_mapping:
+            events_to_trigger.append(event_mapping[event])
+        # If this is a lowercase event, also check for PascalCase version
+        elif event in event_mapping.values():
+            # Find the PascalCase version
+            for pascal, lower in event_mapping.items():
+                if lower == event:
+                    events_to_trigger.append(pascal)
+                    break
+        
+        # Trigger callbacks for all event name variations
+        for event_name in events_to_trigger:
+            callbacks = self._event_callbacks.get(event_name, [])
+            if callbacks:
+                logger.info(f"🚀 Triggering event '{event_name}' with {len(callbacks)} callbacks")
+                for callback in callbacks:
+                    try:
+                        logger.debug(f"Calling callback for event '{event_name}'")
+                        if asyncio.iscoroutinefunction(callback):
+                            await callback(data)
+                        else:
+                            callback(data)
+                    except Exception as e:
+                        logger.error(f"Error in event callback for {event_name}: {e}")
+            else:
+                # Only log for the original event name to avoid duplicate logs
+                if event_name == event:
+                    logger.info(f"🚀 Triggering event '{event_name}' with 0 callbacks")
 
 
 class BlackholioClient:

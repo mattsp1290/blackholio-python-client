@@ -735,10 +735,18 @@ class GameClient(GameClientInterface):
         try:
             logger.info(f"🚀 Registering EARLY event handlers on {type(connection)}")
             
-            # Register handlers for subscription data
+            # Register handlers for subscription data - use BOTH PascalCase and lowercase
+            # PascalCase versions (for raw protocol messages)
+            connection.on('IdentityToken', self._handle_identity_token)
+            connection.on('DatabaseUpdate', self._handle_database_update)
+            connection.on('InitialSubscription', self._handle_initial_subscription_data)
+            connection.on('TransactionUpdate', self._handle_transaction_update_data)
+            
+            # lowercase versions (for mapped messages)
             connection.on('initial_subscription', self._handle_initial_subscription_data)
             connection.on('transaction_update', self._handle_transaction_update_data)
             connection.on('identity_token', self._handle_identity_token)
+            connection.on('database_update', self._handle_database_update)
             connection.on('raw_message', self._debug_event_handler)
             
             # Verify registration
@@ -756,18 +764,44 @@ class GameClient(GameClientInterface):
         """Handle identity token event."""
         try:
             logger.info(f"🔐 Processing identity token")
-            if isinstance(data, dict) and 'identity_token' in data:
-                token_data = data['identity_token']
-                # Process identity token
-                if isinstance(token_data, dict):
-                    self._identity = token_data.get('identity')
-                    self._token = token_data.get('token')
-                elif isinstance(token_data, str):
-                    # Token might be a simple string
-                    self._identity = token_data
-                logger.info(f"🔐 Identity set: {self._identity is not None}")
+            
+            # Handle different data formats
+            if isinstance(data, dict):
+                # Check for typed message format
+                if data.get('type') == 'IdentityToken':
+                    # Direct format: {"type": "IdentityToken", "identity": ..., "token": ...}
+                    self._identity = data.get('identity')
+                    self._token = data.get('token')
+                elif 'identity_token' in data:
+                    # Wrapped format: {"identity_token": {...}}
+                    token_data = data['identity_token']
+                    if isinstance(token_data, dict):
+                        self._identity = token_data.get('identity')
+                        self._token = token_data.get('token')
+                    elif isinstance(token_data, str):
+                        self._identity = token_data
+                        
+            logger.info(f"🔐 Identity set: {self._identity is not None}")
         except Exception as e:
             logger.error(f"Error handling identity token: {e}")
+    
+    async def _handle_database_update(self, data: Any) -> None:
+        """Handle database update event (which is often the initial subscription data)."""
+        try:
+            logger.info(f"📀 Processing database update")
+            
+            # DatabaseUpdate with 'tables' is typically the initial subscription
+            if isinstance(data, dict):
+                if data.get('type') == 'DatabaseUpdate' and 'tables' in data:
+                    # This is initial subscription data in a different format
+                    await self._handle_initial_subscription_data(data)
+                elif 'database_update' in data:
+                    # Standard format
+                    db_update = data['database_update']
+                    await self._process_database_update(db_update)
+                    
+        except Exception as e:
+            logger.error(f"Error handling database update: {e}")
     
     async def _process_existing_subscription_data(self) -> None:
         """Process any subscription data that was already received during connection setup."""
@@ -876,9 +910,15 @@ class GameClient(GameClientInterface):
                 logger.debug(f"📊 Subscription data keys: {list(subscription_data.keys())[:5]}")
             
             # Process database_update if present
-            if isinstance(subscription_data, dict) and 'database_update' in subscription_data:
-                db_update = subscription_data['database_update']
-                await self._process_database_update(db_update)
+            if isinstance(subscription_data, dict):
+                if 'database_update' in subscription_data:
+                    db_update = subscription_data['database_update']
+                    await self._process_database_update(db_update)
+                elif 'tables' in subscription_data:
+                    # Handle DatabaseUpdate format (type + tables directly)
+                    await self._process_database_update(subscription_data)
+                else:
+                    logger.warning(f"⚠️ Subscription data has unexpected format. Keys: {list(subscription_data.keys())[:10]}")
                 
         except Exception as e:
             logger.error(f"Error handling initial subscription data: {e}")
@@ -900,25 +940,39 @@ class GameClient(GameClientInterface):
     async def _process_database_update(self, db_update: Dict[str, Any]) -> None:
         """Process database update and populate client caches."""
         try:
-            # Process table updates
-            tables = db_update.get('tables', [])
+            # Handle different formats of database updates
+            tables_data = None
             
-            for table_update in tables:
-                table_name = table_update.get('table_name', '').lower()
-                
-                # Process inserts
-                for insert in table_update.get('inserts', []):
-                    await self._process_table_insert(table_name, insert)
-                
-                # Process updates  
-                for update in table_update.get('updates', []):
-                    await self._process_table_update(table_name, update)
-                
-                # Process deletes
-                for delete in table_update.get('deletes', []):
-                    await self._process_table_delete(table_name, delete)
+            if 'tables' in db_update:
+                # Direct tables format (DatabaseUpdate message)
+                tables_data = db_update.get('tables')
+                if isinstance(tables_data, dict):
+                    # Tables might be a dict keyed by table name
+                    for table_name, table_data in tables_data.items():
+                        logger.info(f"📊 Processing table '{table_name}' with {len(table_data) if isinstance(table_data, list) else 'unknown'} items")
+                        if isinstance(table_data, list):
+                            for item in table_data:
+                                await self._process_table_insert(table_name.lower(), item)
+                elif isinstance(tables_data, list):
+                    # Tables might be a list of table updates
+                    for table_update in tables_data:
+                        table_name = table_update.get('table_name', '').lower()
+                        
+                        # Process inserts
+                        for insert in table_update.get('inserts', []):
+                            await self._process_table_insert(table_name, insert)
+                        
+                        # Process updates  
+                        for update in table_update.get('updates', []):
+                            await self._process_table_update(table_name, update)
+                        
+                        # Process deletes
+                        for delete in table_update.get('deletes', []):
+                            await self._process_table_delete(table_name, delete)
+            else:
+                logger.warning(f"⚠️ No 'tables' key in database update. Keys: {list(db_update.keys())}")
                     
-            logger.debug(f"Processed database update - Players: {len(self._players)}, Entities: {len(self._entities)}")
+            logger.info(f"✅ Processed database update - Players: {len(self._players)}, Entities: {len(self._entities)}")
                     
         except Exception as e:
             logger.error(f"Error processing database update: {e}")
