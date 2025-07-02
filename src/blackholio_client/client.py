@@ -852,10 +852,31 @@ class GameClient(GameClientInterface):
         """Handle initial subscription data from connection."""
         try:
             logger.info("🎯 Processing initial subscription data")
-            subscription_data = data.get('subscription_data', {})
+            
+            # Handle different data formats
+            if isinstance(data, dict):
+                # Check if data is wrapped or direct
+                if 'subscription_data' in data:
+                    subscription_data = data['subscription_data']
+                else:
+                    # Data might be the subscription data directly
+                    subscription_data = data
+            else:
+                logger.error(f"❌ Expected dict for subscription data, got {type(data)}")
+                return
+            
+            # Safety check for None
+            if subscription_data is None:
+                logger.error("❌ Subscription data is None")
+                return
+            
+            # Debug log the structure
+            logger.debug(f"📊 Subscription data type: {type(subscription_data)}")
+            if isinstance(subscription_data, dict):
+                logger.debug(f"📊 Subscription data keys: {list(subscription_data.keys())[:5]}")
             
             # Process database_update if present
-            if 'database_update' in subscription_data:
+            if isinstance(subscription_data, dict) and 'database_update' in subscription_data:
                 db_update = subscription_data['database_update']
                 await self._process_database_update(db_update)
                 
