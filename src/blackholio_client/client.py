@@ -139,6 +139,7 @@ class GameClient(GameClientInterface):
         self._connection_context: Optional[Any] = None
         self._connection_lock = asyncio.Lock()
         self._is_connecting = False
+        self._direct_connection_ref: Optional[Any] = None  # For early callback registration
         
         # Configure auto-reconnect if enabled
         if self._auto_reconnect:
@@ -172,20 +173,43 @@ class GameClient(GameClientInterface):
                     database=self._database
                 )
                 
-                # Properly enter the context manager
-                self._active_connection = await self._connection_context.__aenter__()
+                # CRITICAL FIX: Create connection object directly to register handlers early
+                # Create the connection object but don't connect yet
+                from .connection.spacetimedb_connection import SpacetimeDBConnection
+                from .connection.server_config import ServerConfig
                 
-                if self._active_connection:
+                # Build server config
+                server_config = ServerConfig(
+                    language=self._server_language,
+                    host=self._config.server_ip,
+                    port=self._config.server_port,
+                    db_identity=self._database,
+                    protocol=self._protocol,
+                    use_ssl=False
+                )
+                
+                # Create connection object
+                direct_connection = SpacetimeDBConnection(server_config)
+                
+                # Register event handlers BEFORE connecting
+                logger.info("🎯 Registering event handlers BEFORE connection starts processing messages")
+                self._register_early_event_handlers(direct_connection)
+                
+                # Store the connection reference for later
+                self._direct_connection_ref = direct_connection
+                
+                # Now connect with handlers already registered
+                connection_success = await direct_connection.connect()
+                
+                if connection_success:
+                    # Store as active connection
+                    self._active_connection = direct_connection
                     self._connection_state = ConnectionState.CONNECTED
                     self._stats['successful_connections'] += 1
                     self._stats['last_activity'] = datetime.now()
                     self._notify_connection_state_changed()
                     
-                    # Set up event handlers for future messages
-                    self._bridge_connection_events()
-                    
-                    # CRITICAL FIX: Process any subscription data that was already received
-                    # This handles the timing issue where InitialSubscription arrives before handlers are set up
+                    # Process any subscription data that was stored during connection
                     await self._process_existing_subscription_data()
                     
                     # Authenticate if token provided
@@ -212,9 +236,9 @@ class GameClient(GameClientInterface):
         self._stats['failed_connections'] += 1
         self._notify_connection_state_changed()
         
-        if self._connection_context and self._active_connection:
+        if self._active_connection:
             try:
-                await self._connection_context.__aexit__(None, None, None)
+                await self._active_connection.disconnect()
             except Exception as e:
                 logger.debug(f"Error during connection cleanup: {e}")
             finally:
@@ -235,9 +259,9 @@ class GameClient(GameClientInterface):
                 self._players.clear()
                 self._circles.clear()
                 
-                # Properly exit the context manager
-                if self._connection_context and self._active_connection:
-                    await self._connection_context.__aexit__(None, None, None)
+                # Disconnect the active connection
+                if self._active_connection:
+                    await self._active_connection.disconnect()
                 
             except Exception as e:
                 logger.error(f"Error during disconnect: {e}")
@@ -706,15 +730,15 @@ class GameClient(GameClientInterface):
         # Note: This will be called during connect() when we have an active connection
         pass
     
-    def _setup_early_event_handlers(self, connection) -> None:
-        """Set up event handlers before connection processes messages."""
+    def _register_early_event_handlers(self, connection) -> None:
+        """Register event handlers on connection object BEFORE it starts processing messages."""
         try:
-            logger.info(f"🚀 Setting up EARLY event handlers on {type(connection)}")
+            logger.info(f"🚀 Registering EARLY event handlers on {type(connection)}")
             
             # Register handlers for subscription data
             connection.on('initial_subscription', self._handle_initial_subscription_data)
             connection.on('transaction_update', self._handle_transaction_update_data)
-            connection.on('identity_token', self._debug_event_handler)
+            connection.on('identity_token', self._handle_identity_token)
             connection.on('raw_message', self._debug_event_handler)
             
             # Verify registration
@@ -724,9 +748,26 @@ class GameClient(GameClientInterface):
                     logger.info(f"🎯   {event}: {len(callbacks)} callbacks")
             
         except Exception as e:
-            logger.error(f"Failed to set up early event handlers: {e}")
+            logger.error(f"Failed to register early event handlers: {e}")
             import traceback
             traceback.print_exc()
+    
+    async def _handle_identity_token(self, data: Any) -> None:
+        """Handle identity token event."""
+        try:
+            logger.info(f"🔐 Processing identity token")
+            if isinstance(data, dict) and 'identity_token' in data:
+                token_data = data['identity_token']
+                # Process identity token
+                if isinstance(token_data, dict):
+                    self._identity = token_data.get('identity')
+                    self._token = token_data.get('token')
+                elif isinstance(token_data, str):
+                    # Token might be a simple string
+                    self._identity = token_data
+                logger.info(f"🔐 Identity set: {self._identity is not None}")
+        except Exception as e:
+            logger.error(f"Error handling identity token: {e}")
     
     async def _process_existing_subscription_data(self) -> None:
         """Process any subscription data that was already received during connection setup."""

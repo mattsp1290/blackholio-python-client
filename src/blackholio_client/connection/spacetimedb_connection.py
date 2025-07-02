@@ -130,6 +130,7 @@ class SpacetimeDBConnection:
         self._subscriptions_active = False
         self._last_data_received: Optional[float] = None
         self._subscription_tables: List[str] = []
+        self._last_initial_subscription: Optional[Dict[str, Any]] = None  # Store InitialSubscription for later
         
         logger.info(f"Initialized SpacetimeDB connection for {config.language} server at {config.host}")
         if not SDK_VALIDATION_AVAILABLE:

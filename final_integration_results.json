@@ -1,62 +1,62 @@
 {
-  "start_time": "2025-06-20T12:20:47.480882",
+  "start_time": "2025-07-02T18:46:48.159201",
   "tests": {
     "github_installation": {
       "status": "PASSED",
       "message": "Successfully installed and imported package. Version: 0.1.0",
-      "timestamp": "2025-06-20T12:20:53.641506"
+      "timestamp": "2025-07-02T18:47:05.165493"
     },
     "environment_configuration": {
       "status": "PASSED",
       "message": "All server languages configured correctly: ['rust', 'python', 'csharp', 'go']",
-      "timestamp": "2025-06-20T12:20:53.710827"
+      "timestamp": "2025-07-02T18:47:05.412404"
     },
     "docker_deployment": {
-      "status": "PASSED",
-      "message": "Docker deployment validation successful",
-      "timestamp": "2025-06-20T12:21:04.178057"
+      "status": "FAILED",
+      "message": "Docker build failed: #0 building with \"default\" instance using docker driver\n\n#1 [internal] load build definition from Dockerfile.test\n#1 transferring dockerfile: 591B done\n#1 DONE 0.0s\n\n#2 [internal] load metadata for docker.io/library/python:3.11-slim\n#2 DONE 1.0s\n\n#3 [internal] load .dockerignore\n#3 transferring context: 913B 0.0s done\n#3 DONE 0.0s\n\n#4 [internal] load build context\n#4 transferring context: 3.75MB 0.0s done\n#4 DONE 0.1s\n\n#5 [1/6] FROM docker.io/library/python:3.11-slim@sha256:139020233cc412efe4c8135b0efe1c7569dc8b28ddd88bddb109b764f8977e30\n#5 resolve docker.io/library/python:3.11-slim@sha256:139020233cc412efe4c8135b0efe1c7569dc8b28ddd88bddb109b764f8977e30 0.0s done\n#5 sha256:60d9b0bcb0b0188c13173f03f5013b061f0cd078913707486330c4272ccf8f89 0B / 16.14MB 0.2s\n#5 sha256:60d9b0bcb0b0188c13173f03f5013b061f0cd078913707486330c4272ccf8f89 7.34MB / 16.14MB 0.3s\n#5 sha256:f2ade477537ee2c8bdf36beee053c8cc2c5aa440225436c69f1dafd6f20904f4 0B / 250B 0.2s\n#5 sha256:6e88b4602d856d9c6fd77c5ce5fc92d0fd2b235bde9fcf47cd0b39a63e49cd85 0B / 3.34MB 0.2s\n#5 sha256:37259e7330667afd74c3386d3ed869f06bd9b7714370c78e3065f4e28607cc02 0B / 28.08MB 0.2s\n#5 sha256:60d9b0bcb0b0188c13173f03f5013b061f0cd078913707486330c4272ccf8f89 16.14MB / 16.14MB 0.4s done\n#5 sha256:f2ade477537ee2c8bdf36beee053c8cc2c5aa440225436c69f1dafd6f20904f4 250B / 250B 0.3s done\n#5 sha256:6e88b4602d856d9c6fd77c5ce5fc92d0fd2b235bde9fcf47cd0b39a63e49cd85 3.34MB / 3.34MB 0.5s done\n#5 sha256:37259e7330667afd74c3386d3ed869f06bd9b7714370c78e3065f4e28607cc02 7.34MB / 28.08MB 0.6s\n#5 sha256:37259e7330667afd74c3386d3ed869f06bd9b7714370c78e3065f4e28607cc02 17.83MB / 28.08MB 0.8s\n#5 sha256:37259e7330667afd74c3386d3ed869f06bd9b7714370c78e3065f4e28607cc02 28.08MB / 28.08MB 0.9s done\n#5 extracting sha256:37259e7330667afd74c3386d3ed869f06bd9b7714370c78e3065f4e28607cc02\n#5 extracting sha256:37259e7330667afd74c3386d3ed869f06bd9b7714370c78e3065f4e28607cc02 0.5s done\n#5 DONE 1.5s\n\n#5 [1/6] FROM docker.io/library/python:3.11-slim@sha256:139020233cc412efe4c8135b0efe1c7569dc8b28ddd88bddb109b764f8977e30\n#5 extracting sha256:6e88b4602d856d9c6fd77c5ce5fc92d0fd2b235bde9fcf47cd0b39a63e49cd85 0.1s done\n#5 extracting sha256:60d9b0bcb0b0188c13173f03f5013b061f0cd078913707486330c4272ccf8f89\n#5 extracting sha256:60d9b0bcb0b0188c13173f03f5013b061f0cd078913707486330c4272ccf8f89 0.2s done\n#5 DONE 1.8s\n\n#5 [1/6] FROM docker.io/library/python:3.11-slim@sha256:139020233cc412efe4c8135b0efe1c7569dc8b28ddd88bddb109b764f8977e30\n#5 extracting sha256:f2ade477537ee2c8bdf36beee053c8cc2c5aa440225436c69f1dafd6f20904f4 done\n#5 DONE 1.8s\n\n#6 [2/6] WORKDIR /app\n#6 DONE 0.1s\n\n#7 [3/6] COPY . /app/\n#7 DONE 0.1s\n\n#8 [4/6] RUN pip install -e .\n#8 0.918 Obtaining file:///app\n#8 0.920   Installing build dependencies: started\n#8 2.104   Installing build dependencies: finished with status 'done'\n#8 2.105   Checking if build backend supports build_editable: started\n#8 2.174   Checking if build backend supports build_editable: finished with status 'done'\n#8 2.174   Getting requirements to build editable: started\n#8 2.265   Getting requirements to build editable: finished with status 'done'\n#8 2.265   Preparing editable metadata (pyproject.toml): started\n#8 2.344   Preparing editable metadata (pyproject.toml): finished with status 'done'\n#8 2.350 Collecting spacetimedb-sdk@ git+https://github.com/mattsp1290/spacetimedb-python-sdk.git (from blackholio-client==0.1.0)\n#8 2.350   Cloning https://github.com/mattsp1290/spacetimedb-python-sdk.git to /tmp/pip-install-jk5_e_r5/spacetimedb-sdk_67c6c52165e94a399231654c80e21a34\n#8 2.350   ERROR: Error [Errno 2] No such file or directory: 'git' while executing command git version\n#8 2.351 ERROR: Cannot find command 'git' - do you have 'git' installed and in your PATH?\n#8 2.353 \n#8 2.353 [notice] A new release of pip is available: 24.0 -> 25.1.1\n#8 2.353 [notice] To update, run: pip install --upgrade pip\n#8 ERROR: process \"/bin/sh -c pip install -e .\" did not complete successfully: exit code: 1\n------\n > [4/6] RUN pip install -e .:\n2.265   Getting requirements to build editable: finished with status 'done'\n2.265   Preparing editable metadata (pyproject.toml): started\n2.344   Preparing editable metadata (pyproject.toml): finished with status 'done'\n2.350 Collecting spacetimedb-sdk@ git+https://github.com/mattsp1290/spacetimedb-python-sdk.git (from blackholio-client==0.1.0)\n2.350   Cloning https://github.com/mattsp1290/spacetimedb-python-sdk.git to /tmp/pip-install-jk5_e_r5/spacetimedb-sdk_67c6c52165e94a399231654c80e21a34\n2.350   ERROR: Error [Errno 2] No such file or directory: 'git' while executing command git version\n2.351 ERROR: Cannot find command 'git' - do you have 'git' installed and in your PATH?\n2.353 \n2.353 [notice] A new release of pip is available: 24.0 -> 25.1.1\n2.353 [notice] To update, run: pip install --upgrade pip\n------\nDockerfile.test:7\n--------------------\n   5 |     COPY . /app/\n   6 |     \n   7 | >>> RUN pip install -e .\n   8 |     \n   9 |     # Test imports\n--------------------\nERROR: failed to solve: process \"/bin/sh -c pip install -e .\" did not complete successfully: exit code: 1\n",
+      "timestamp": "2025-07-02T18:47:11.237795"
     },
     "client_functionality": {
       "status": "PASSED",
       "message": "Client functionality validated. Languages: ['rust', 'python', 'csharp', 'go'], Events working: 1 received",
-      "timestamp": "2025-06-20T12:21:04.179442"
+      "timestamp": "2025-07-02T18:47:11.238351"
     },
     "performance_benchmarks": {
       "status": "PASSED",
-      "message": "Performance excellent! Vector: 3,383,415/sec, Entity: 512,908/sec",
-      "timestamp": "2025-06-20T12:21:06.179489"
+      "message": "Performance excellent! Vector: 3,474,560/sec, Entity: 549,070/sec",
+      "timestamp": "2025-07-02T18:47:13.238370"
     },
     "migration_compatibility": {
       "status": "PASSED",
       "message": "All 4 migration scripts validated",
-      "timestamp": "2025-06-20T12:21:06.284411"
+      "timestamp": "2025-07-02T18:47:13.328381"
     },
     "security_validation": {
       "status": "PASSED",
       "message": "Security validation passed: Path validation and cryptography working",
-      "timestamp": "2025-06-20T12:21:06.300922"
+      "timestamp": "2025-07-02T18:47:13.340583"
     },
     "ci_cd_readiness": {
       "status": "PASSED",
       "message": "CI/CD ready: All files present, 7 make commands working",
-      "timestamp": "2025-06-20T12:21:06.311113"
+      "timestamp": "2025-07-02T18:47:13.354420"
     },
     "documentation_completeness": {
       "status": "PASSED",
       "message": "Documentation 100.0% complete (10/10 docs)",
-      "timestamp": "2025-06-20T12:21:06.312819"
+      "timestamp": "2025-07-02T18:47:13.356079"
     },
     "production_readiness": {
       "status": "PASSED",
-      "message": "PRODUCTION READY! \u2705 All checks passed. Consolidated 27,402 lines of code into reusable package!",
-      "timestamp": "2025-06-20T12:21:06.327899"
+      "message": "PRODUCTION READY! \u2705 All checks passed. Consolidated 29,886 lines of code into reusable package!",
+      "timestamp": "2025-07-02T18:47:13.370404"
     }
   },
   "summary": {
     "total": 10,
-    "passed": 10,
-    "failed": 0,
+    "passed": 9,
+    "failed": 1,
     "skipped": 0
   },
-  "end_time": "2025-06-20T12:21:06.327922"
+  "end_time": "2025-07-02T18:47:13.370425"
 }
