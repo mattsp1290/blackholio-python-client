@@ -113,19 +113,18 @@ class V112ProtocolHandler(ProtocolHandler):
             return None
     
     def format_outgoing_message(self, message_type: str, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Format outgoing message for v1.1.2 protocol."""
-        timestamp = datetime.utcnow().isoformat() + 'Z'
+        """
+        Format outgoing message for v1.1.2 protocol.
         
-        base_message = {
-            'protocol': 'v1.json.spacetimedb',
-            'timestamp': timestamp,
-            'type': message_type
-        }
+        CRITICAL: SpacetimeDB does NOT accept custom "type" fields in JSON messages.
+        Only specific protocol-compliant message formats are allowed.
+        """
+        # IMPORTANT: Do not add arbitrary fields like 'type', 'protocol', or 'timestamp'
+        # SpacetimeDB protocol has specific message formats that must be followed
         
-        # Add message-specific data
-        base_message.update(data)
-        
-        return base_message
+        # For now, just return the data as-is
+        # The actual formatting should be done by the SDK's protocol helper
+        return data
     
     def _safe_extract(self, obj, attr_name, default=None):
         """Safely extract attribute from object or dict"""

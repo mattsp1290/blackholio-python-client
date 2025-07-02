@@ -114,14 +114,12 @@ async def test_close_frame_sending():
     # Test _send_close_frame method directly
     await conn._send_close_frame()
     
-    # Verify close frame was sent
-    assert len(sent_messages) == 1
-    close_message = sent_messages[0]
-    assert close_message['type'] == 'close'
-    assert close_message['reason'] == 'client_disconnect'
-    assert 'timestamp' in close_message
-    print("✅ Test 6: Close frame sent with correct structure")
-    print(f"   Close frame: {close_message}")
+    # CRITICAL: After protocol compliance fix, NO custom messages should be sent
+    # SpacetimeDB protocol does not accept arbitrary "type" messages
+    # WebSocket close frames are handled at the protocol layer, not application layer
+    assert len(sent_messages) == 0
+    print("✅ Test 6: No custom close messages sent (protocol compliant behavior)")
+    print("   Close frames handled by WebSocket protocol layer")
     
     return True
 

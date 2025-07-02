@@ -125,6 +125,12 @@ class SpacetimeDBConnection:
         self._bytes_sent = 0
         self._bytes_received = 0
         
+        # Connection state synchronization
+        self._connection_ready = False
+        self._subscriptions_active = False
+        self._last_data_received: Optional[float] = None
+        self._subscription_tables: List[str] = []
+        
         logger.info(f"Initialized SpacetimeDB connection for {config.language} server at {config.host}")
         if not SDK_VALIDATION_AVAILABLE:
             logger.warning("Enhanced SDK protocol validation not available - using basic validation")
@@ -180,8 +186,13 @@ class SpacetimeDBConnection:
                 # Send initial subscription request
                 await self._send_subscription_request()
                 
+                # Wait for subscription data to start flowing
+                subscription_ready = await self.wait_for_subscription_data(timeout=5.0)
+                if not subscription_ready:
+                    logger.warning("Subscription data not flowing after connection - subscriptions may not be working")
+                
                 identity_info = f" with identity: {self._identity}" if self._identity else ""
-                logger.info(f"Successfully connected to SpacetimeDB{identity_info}")
+                logger.info(f"Successfully connected to SpacetimeDB{identity_info} - subscriptions {'active' if subscription_ready else 'pending'}")
                 await self._trigger_event('connected', {
                     'server': self.config.language,
                     'url': ws_url,
@@ -341,14 +352,11 @@ class SpacetimeDBConnection:
             )
             
             # Validate negotiated protocol
-            negotiated_protocol = getattr(self.websocket, 'subprotocol', None)
-            if negotiated_protocol:
-                logger.info(f"Connected with protocol: {negotiated_protocol}")
-                if negotiated_protocol != "v1.json.spacetimedb":
-                    logger.warning(f"Protocol mismatch - requested JSON but got: {negotiated_protocol}")
+            negotiated_protocol = await self.negotiate_protocol()
+            if not negotiated_protocol:
+                logger.warning("Failed to negotiate protocol with server")
                     
             logger.info(f"Connected to SpacetimeDB at {url}")
-            self._protocol_validated = True
             return True
             
         except InvalidStatus as e:
@@ -423,7 +431,10 @@ class SpacetimeDBConnection:
                 timeout=self._connection_timeout
             )
             
-            logger.info(f"Authentication successful - connected with identity: {identity}")
+            # Validate negotiated protocol after authentication
+            negotiated_protocol = await self.negotiate_protocol()
+            
+            logger.info(f"Authentication successful - connected with identity: {identity}, protocol: {negotiated_protocol}")
             return True
             
         except Exception as e:
@@ -459,6 +470,47 @@ class SpacetimeDBConnection:
                 
         except Exception as e:
             logger.debug(f"Failed to load credentials: {e}")
+    
+    async def negotiate_protocol(self) -> Optional[str]:
+        """
+        Negotiate protocol version with server.
+        
+        Returns:
+            Negotiated protocol version or None if negotiation fails
+        """
+        if not self.websocket:
+            logger.error("Cannot negotiate protocol without active websocket connection")
+            return None
+            
+        try:
+            # Check negotiated subprotocol
+            negotiated_protocol = getattr(self.websocket, 'subprotocol', None)
+            
+            if negotiated_protocol:
+                logger.info(f"Negotiated protocol: {negotiated_protocol}")
+                
+                # Update protocol mode based on negotiation
+                if negotiated_protocol == "v1.json.spacetimedb":
+                    self._protocol_version = negotiated_protocol
+                    self._protocol_validated = True
+                    # Ensure we're using JSON mode
+                    if hasattr(self.protocol_helper, 'use_binary'):
+                        self.protocol_helper.use_binary = False
+                elif negotiated_protocol == "v1.bsatn.spacetimedb":
+                    logger.warning("Server negotiated binary protocol but client is configured for JSON")
+                    self._protocol_version = negotiated_protocol
+                    # We could switch to binary mode here if needed
+                else:
+                    logger.warning(f"Unknown negotiated protocol: {negotiated_protocol}")
+                    
+                return negotiated_protocol
+            else:
+                logger.warning("No protocol negotiated with server")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error during protocol negotiation: {e}")
+            return None
     
     async def _store_credentials(self):
         """Store credentials for reuse."""
@@ -534,10 +586,11 @@ class SpacetimeDBConnection:
             # Use SDK methods directly - JSON protocol returns strings for TEXT frames
             message_type = message.get('type', '')
             
+            # CRITICAL: Never send custom "type" messages to SpacetimeDB
+            # The protocol doesn't accept arbitrary JSON with "type" fields
             if message_type == 'heartbeat':
-                # For heartbeat, use simple JSON encoding
-                import json
-                message_data = json.dumps(message)
+                # Heartbeat should be handled via WebSocket ping, not custom messages
+                raise SpacetimeDBError("Custom heartbeat messages violate SpacetimeDB protocol. Use WebSocket ping instead.")
             elif 'reducer' in message:
                 # Use encode_reducer_call for reducer messages
                 reducer_name = message.get('reducer', '')
@@ -798,11 +851,15 @@ class SpacetimeDBConnection:
                 message_type = 'initial_subscription'
                 processed_data = {'type': message_type, 'subscription_data': data['InitialSubscription']}
                 logger.debug("Recognized InitialSubscription message")
+                # Mark that we're receiving subscription data
+                self.on_subscription_data(data)
                 
             elif 'TransactionUpdate' in data:
                 message_type = 'transaction_update'
                 processed_data = {'type': message_type, 'update_data': data['TransactionUpdate']}
                 logger.debug("Recognized TransactionUpdate message")
+                # Mark that we're receiving subscription data
+                self.on_subscription_data(data)
                 
             else:
                 # Fall back to protocol handler for other message types
@@ -812,6 +869,9 @@ class SpacetimeDBConnection:
             
             # Trigger events if we have processed data
             if processed_data and message_type:
+                # Check if this is a subscription-related message
+                if message_type in ('subscription_update', 'initial_subscription', 'transaction_update'):
+                    self.on_subscription_data(processed_data)
                 await self._trigger_event(message_type, processed_data)
             elif data:
                 # Log unrecognized message but don't fail completely
@@ -1069,6 +1129,48 @@ class SpacetimeDBConnection:
             # Sleep for a short interval
             await asyncio.sleep(0.1)
     
+    async def wait_for_subscription_data(self, timeout: float = 5.0) -> bool:
+        """
+        Wait for subscription data to start flowing.
+        
+        Args:
+            timeout: Maximum time to wait for subscription data
+            
+        Returns:
+            True if subscription data is flowing, False if timeout
+        """
+        start_time = time.time()
+        
+        logger.debug(f"Waiting for subscription data (timeout: {timeout}s)")
+        
+        while time.time() - start_time < timeout:
+            # Check if we've received data recently
+            if self._last_data_received and time.time() - self._last_data_received < 1.0:
+                logger.debug("Subscription data confirmed - data received within last second")
+                self._subscriptions_active = True
+                return True
+            
+            # Also check if we've marked subscriptions as active
+            if self._subscriptions_active:
+                logger.debug("Subscriptions marked as active")
+                return True
+            
+            await asyncio.sleep(0.1)
+        
+        logger.warning(f"Timeout waiting for subscription data after {timeout}s")
+        return False
+    
+    def on_subscription_data(self, data: Any) -> None:
+        """
+        Mark that subscription data was received.
+        
+        Args:
+            data: The subscription data received
+        """
+        self._last_data_received = time.time()
+        self._subscriptions_active = True
+        logger.debug("Subscription data received - marking connection as active")
+    
     def enable_protocol_debugging(self) -> None:
         """
         Enable enhanced protocol debugging to help identify protocol issues.
@@ -1171,6 +1273,11 @@ class BlackholioClient:
         self.connection.on('entity_update', self._handle_entity_update)
         self.connection.on('player_update', self._handle_player_update)
         self.connection.on('game_state', self._handle_game_state)
+        
+        # Add subscription-related event handlers
+        self.connection.on('initial_subscription', self._handle_initial_subscription)
+        self.connection.on('subscription_update', self._handle_subscription_update)
+        self.connection.on('transaction_update', self._handle_transaction_update)
     
     async def connect(self) -> bool:
         """Connect to the game server."""
@@ -1301,3 +1408,67 @@ class BlackholioClient:
         if self.player_id and self.player_id in self.game_players:
             return self.game_players[self.player_id]
         return None
+    
+    async def _handle_initial_subscription(self, data: Dict[str, Any]):
+        """Handle initial subscription data."""
+        try:
+            subscription_data = data.get('subscription_data', {})
+            logger.debug(f"Received initial subscription with {len(subscription_data)} tables")
+            
+            # Process any initial data provided
+            if 'tables' in subscription_data:
+                for table_data in subscription_data['tables']:
+                    await self._process_table_data(table_data)
+                    
+        except Exception as e:
+            logger.error(f"Failed to handle initial subscription: {e}")
+    
+    async def _handle_subscription_update(self, data: Dict[str, Any]):
+        """Handle subscription update events."""
+        try:
+            logger.debug("Received subscription update")
+            # Process subscription updates
+            if 'tables' in data:
+                for table_data in data['tables']:
+                    await self._process_table_data(table_data)
+                    
+        except Exception as e:
+            logger.error(f"Failed to handle subscription update: {e}")
+    
+    async def _handle_transaction_update(self, data: Dict[str, Any]):
+        """Handle transaction update events."""
+        try:
+            logger.debug("Received transaction update")
+            
+            # Process entities from transaction update
+            if 'entities' in data:
+                for entity_data in data['entities']:
+                    entity = GameEntity.from_dict(entity_data)
+                    self.game_entities[entity.entity_id] = entity
+                    
+            # Process players from transaction update  
+            if 'players' in data:
+                for player_data in data['players']:
+                    player = GamePlayer.from_dict(player_data)
+                    self.game_players[player.player_id] = player
+                    
+        except Exception as e:
+            logger.error(f"Failed to handle transaction update: {e}")
+    
+    async def _process_table_data(self, table_data: Dict[str, Any]):
+        """Process data from a specific table."""
+        try:
+            table_name = table_data.get('table_name', '').lower()
+            
+            if 'entity' in table_name:
+                for row in table_data.get('rows', []):
+                    entity = GameEntity.from_dict(row)
+                    self.game_entities[entity.entity_id] = entity
+                    
+            elif 'player' in table_name:
+                for row in table_data.get('rows', []):
+                    player = GamePlayer.from_dict(row)
+                    self.game_players[player.player_id] = player
+                    
+        except Exception as e:
+            logger.error(f"Failed to process table data: {e}")
