@@ -1460,12 +1460,12 @@ class BlackholioClient:
         try:
             table_name = table_data.get('table_name', '').lower()
             
-            if 'entity' in table_name:
+            if table_name in ['entities', 'entity', 'game_entities']:
                 for row in table_data.get('rows', []):
                     entity = GameEntity.from_dict(row)
                     self.game_entities[entity.entity_id] = entity
                     
-            elif 'player' in table_name:
+            elif table_name in ['players', 'player', 'game_players']:
                 for row in table_data.get('rows', []):
                     player = GamePlayer.from_dict(row)
                     self.game_players[player.player_id] = player
