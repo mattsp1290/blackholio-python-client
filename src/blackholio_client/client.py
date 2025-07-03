@@ -1066,23 +1066,73 @@ class GameClient(GameClientInterface):
                         table_name = table_update.get('table_name', '').lower()
                         logger.info(f"📊 Table update {i} for table: '{table_name}'")
                         
-                        # Process inserts
-                        inserts = table_update.get('inserts', [])
-                        logger.info(f"📊 Table '{table_name}' has {len(inserts)} inserts")
-                        for insert in inserts:
-                            await self._process_table_insert(table_name, insert)
+                        # SpacetimeDB sends updates in a nested structure
+                        # table_update.updates is a list of update operations
+                        # Each operation has inserts/updates/deletes arrays
+                        update_operations = table_update.get('updates', [])
                         
-                        # Process updates  
-                        updates = table_update.get('updates', [])
-                        logger.info(f"📊 Table '{table_name}' has {len(updates)} updates")
-                        for update in updates:
-                            await self._process_table_update(table_name, update)
-                        
-                        # Process deletes
-                        deletes = table_update.get('deletes', [])
-                        logger.info(f"📊 Table '{table_name}' has {len(deletes)} deletes")
-                        for delete in deletes:
-                            await self._process_table_delete(table_name, delete)
+                        if update_operations:
+                            logger.info(f"📊 Table '{table_name}' has {len(update_operations)} update operations")
+                            
+                            for op_idx, operation in enumerate(update_operations):
+                                if not isinstance(operation, dict):
+                                    logger.warning(f"📊 Update operation {op_idx} is not a dict: {type(operation)}")
+                                    continue
+                                
+                                # Process inserts within this operation
+                                inserts = operation.get('inserts', [])
+                                logger.info(f"📊 Table '{table_name}' operation {op_idx} has {len(inserts)} inserts")
+                                for insert_data in inserts:
+                                    # Parse JSON string if needed
+                                    if isinstance(insert_data, str):
+                                        try:
+                                            insert_data = json.loads(insert_data)
+                                        except json.JSONDecodeError as e:
+                                            logger.error(f"Failed to parse insert JSON: {e}")
+                                            continue
+                                    await self._process_table_insert(table_name, insert_data)
+                                
+                                # Process updates within this operation
+                                updates = operation.get('updates', [])
+                                logger.info(f"📊 Table '{table_name}' operation {op_idx} has {len(updates)} updates")
+                                for update_data in updates:
+                                    # Parse JSON string if needed
+                                    if isinstance(update_data, str):
+                                        try:
+                                            update_data = json.loads(update_data)
+                                        except json.JSONDecodeError as e:
+                                            logger.error(f"Failed to parse update JSON: {e}")
+                                            continue
+                                    await self._process_table_update(table_name, update_data)
+                                
+                                # Process deletes within this operation
+                                deletes = operation.get('deletes', [])
+                                logger.info(f"📊 Table '{table_name}' operation {op_idx} has {len(deletes)} deletes")
+                                for delete_data in deletes:
+                                    # Parse JSON string if needed
+                                    if isinstance(delete_data, str):
+                                        try:
+                                            delete_data = json.loads(delete_data)
+                                        except json.JSONDecodeError as e:
+                                            logger.error(f"Failed to parse delete JSON: {e}")
+                                            continue
+                                    await self._process_table_delete(table_name, delete_data)
+                        else:
+                            # Fallback to old format (direct inserts/updates/deletes at table level)
+                            inserts = table_update.get('inserts', [])
+                            logger.info(f"📊 Table '{table_name}' has {len(inserts)} direct inserts")
+                            for insert in inserts:
+                                await self._process_table_insert(table_name, insert)
+                            
+                            updates = table_update.get('updates', [])
+                            logger.info(f"📊 Table '{table_name}' has {len(updates)} direct updates")
+                            for update in updates:
+                                await self._process_table_update(table_name, update)
+                            
+                            deletes = table_update.get('deletes', [])
+                            logger.info(f"📊 Table '{table_name}' has {len(deletes)} direct deletes")
+                            for delete in deletes:
+                                await self._process_table_delete(table_name, delete)
                 else:
                     logger.warning(f"📊 tables_data is unexpected type: {type(tables_data)}")
                     logger.warning(f"📊 tables_data content: {str(tables_data)[:200]}")

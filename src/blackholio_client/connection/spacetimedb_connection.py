@@ -592,6 +592,7 @@ class SpacetimeDBConnection:
                 logger.debug("Converted object to JSON string for TEXT frame")
             
             # Send as TEXT frame - only strings are sent as TEXT frames
+            logger.info(f"🔍 [SUBSCRIPTION] Sending subscription request: {json_message}")
             await self.websocket.send(json_message)
             logger.info(f"Sent JSON subscription request as TEXT frame ({len(json_message)} chars)")
             
