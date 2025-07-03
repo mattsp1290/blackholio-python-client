@@ -738,6 +738,48 @@ class SpacetimeDBConnection:
             
             raise SpacetimeDBError(f"Request '{message_type}' failed: {e}")
     
+    async def call_reducer(self, reducer_name: str, args: List[Any]) -> bool:
+        """
+        Call a SpacetimeDB reducer.
+        
+        Args:
+            reducer_name: Name of the reducer to call
+            args: List of arguments to pass to the reducer
+            
+        Returns:
+            True if the reducer call was sent successfully
+        """
+        if not self.websocket or self.state != ConnectionState.CONNECTED:
+            raise BlackholioConnectionError("Not connected to SpacetimeDB")
+        
+        try:
+            # Convert args list to proper format for SpacetimeDB
+            # For the enter_game reducer, it expects a single "name" parameter
+            args_dict = {}
+            if args:
+                if reducer_name == "enter_game" and len(args) == 1:
+                    # Special case for enter_game reducer which expects "name" parameter
+                    args_dict = {"name": args[0]}
+                elif len(args) == 1:
+                    # For other single argument reducers, pass the value directly
+                    args_dict = {"value": args[0]}
+                else:
+                    # For multiple arguments, create indexed dict
+                    args_dict = {f"arg{i}": arg for i, arg in enumerate(args)}
+            
+            # Use the existing _send_message method which handles reducer encoding
+            await self._send_message({
+                'reducer': reducer_name,
+                'args': args_dict
+            })
+            
+            logger.info(f"✅ Called reducer '{reducer_name}' with args: {args}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to call reducer '{reducer_name}': {e}")
+            raise BlackholioConnectionError(f"Reducer call failed: {e}")
+    
     async def _message_handler(self):
         """Handle incoming messages from SpacetimeDB with enhanced protocol validation."""
         try:
