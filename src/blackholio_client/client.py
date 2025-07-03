@@ -788,17 +788,27 @@ class GameClient(GameClientInterface):
     async def _handle_database_update(self, data: Any) -> None:
         """Handle database update event (which is often the initial subscription data)."""
         try:
-            logger.info(f"📀 Processing database update")
+            logger.info(f"📀 Processing database update - Type: {type(data)}")
             
             # DatabaseUpdate with 'tables' is typically the initial subscription
             if isinstance(data, dict):
+                logger.info(f"📀 Database update dict keys: {list(data.keys())}")
+                
                 if data.get('type') == 'DatabaseUpdate' and 'tables' in data:
                     # This is initial subscription data in a different format
+                    logger.info(f"📀 DatabaseUpdate format detected - processing as initial subscription")
                     await self._handle_initial_subscription_data(data)
                 elif 'database_update' in data:
                     # Standard format
                     db_update = data['database_update']
+                    logger.info(f"📀 Standard database_update format - Type: {type(db_update)}")
                     await self._process_database_update(db_update)
+                elif 'tables' in data:
+                    # Direct tables format
+                    logger.info(f"📀 Direct tables format detected")
+                    await self._process_database_update(data)
+                else:
+                    logger.warning(f"📀 Unknown database update format. Keys: {list(data.keys())}")
                     
         except Exception as e:
             logger.error(f"Error handling database update: {e}")
@@ -940,37 +950,150 @@ class GameClient(GameClientInterface):
     async def _process_database_update(self, db_update: Dict[str, Any]) -> None:
         """Process database update and populate client caches."""
         try:
+            logger.info(f"🔍 _process_database_update called with data type: {type(db_update)}")
+            
+            # Detailed logging of the incoming data structure
+            if isinstance(db_update, dict):
+                logger.info(f"🔍 DatabaseUpdate dict keys: {list(db_update.keys())}")
+                logger.info(f"🔍 DatabaseUpdate dict size: {len(db_update)} items")
+                
+                # Log first level values for debugging
+                for key, value in db_update.items():
+                    if isinstance(value, dict):
+                        logger.info(f"🔍   {key}: dict with {len(value)} keys: {list(value.keys())[:10]}")
+                    elif isinstance(value, list):
+                        logger.info(f"🔍   {key}: list with {len(value)} items")
+                        if len(value) > 0:
+                            logger.info(f"🔍   {key}[0]: {type(value[0])}")
+                    else:
+                        logger.info(f"🔍   {key}: {type(value)} = {str(value)[:100]}")
+            else:
+                logger.warning(f"🔍 DatabaseUpdate is not a dict, it's: {type(db_update)}")
+                logger.warning(f"🔍 DatabaseUpdate content: {str(db_update)[:200]}")
+            
             # Handle different formats of database updates
             tables_data = None
+            
+            # 🔍 DEEP DIVE: Log the exact message structure that's causing empty tables
+            logger.info(f"🔍 [DEEP DIVE] Full database update message: {json.dumps(db_update, default=str, indent=2)[:1000]}...")
             
             if 'tables' in db_update:
                 # Direct tables format (DatabaseUpdate message)
                 tables_data = db_update.get('tables')
+                logger.info(f"🔍 Found 'tables' key - tables_data type: {type(tables_data)}")
+                logger.info(f"🔍 [DEEP DIVE] Raw tables_data content: {json.dumps(tables_data, default=str, indent=2)[:500]}...")
+                
+                if tables_data is None:
+                    logger.error("🔍 ❌ CRITICAL: tables_data is None!")
+                    logger.error("🔍 ❌ This means the 'tables' key exists but its value is None")
+                    logger.error(f"🔍 ❌ Full db_update keys and values: {[(k, type(v), str(v)[:50]) for k, v in db_update.items()]}")
+                    return
+                
                 if isinstance(tables_data, dict):
+                    logger.info(f"📊 tables_data is dict with {len(tables_data)} keys: {list(tables_data.keys())}")
+                    
+                    # Check if tables_data is empty
+                    if not tables_data:
+                        logger.error("📊 ❌ PROBLEM FOUND: Tables dict is EMPTY! This explains the empty data.")
+                        logger.error("📊 ❌ Key findings:")
+                        logger.error("📊 ❌   - Message structure is correct (has 'tables' key)")
+                        logger.error("📊 ❌   - Tables field exists but contains empty dict: {}")
+                        logger.error("📊 ❌   - Server is sending valid protocol but no game data")
+                        logger.error("📊 ❌ This indicates the issue is SERVER-SIDE:")
+                        logger.error("📊 ❌   - Server subscription handlers not populating data")
+                        logger.error("📊 ❌   - Server database might be empty")
+                        logger.error("📊 ❌   - Server not executing enter_game or client_connected properly")
+                        logger.error("📊 ❌   - SpacetimeDB subscription SQL not returning data")
+                        return
+                    
                     # Tables might be a dict keyed by table name
                     for table_name, table_data in tables_data.items():
-                        logger.info(f"📊 Processing table '{table_name}' with {len(table_data) if isinstance(table_data, list) else 'unknown'} items")
+                        logger.info(f"📊 Processing table '{table_name}' - Type: {type(table_data)}")
+                        
+                        if table_data is None:
+                            logger.warning(f"📊 Table '{table_name}' data is None!")
+                            continue
+                            
                         if isinstance(table_data, list):
-                            for item in table_data:
+                            logger.info(f"📊 Table '{table_name}' has {len(table_data)} items")
+                            if len(table_data) == 0:
+                                logger.warning(f"📊 Table '{table_name}' is empty (0 items)")
+                            else:
+                                logger.info(f"📊 Table '{table_name}' sample item: {table_data[0] if table_data else 'None'}")
+                            
+                            for i, item in enumerate(table_data):
+                                logger.debug(f"📊 Processing item {i} from table '{table_name}': {type(item)}")
+                                if isinstance(item, dict):
+                                    logger.debug(f"📊   Item keys: {list(item.keys())}")
                                 await self._process_table_insert(table_name.lower(), item)
+                        else:
+                            logger.warning(f"📊 Table '{table_name}' data is not a list: {type(table_data)}")
+                            logger.warning(f"📊 Table '{table_name}' data content: {str(table_data)[:200]}")
+                            
                 elif isinstance(tables_data, list):
+                    logger.info(f"📊 tables_data is list with {len(tables_data)} items")
+                    
+                    if len(tables_data) == 0:
+                        logger.warning("📊 EMPTY TABLES: tables_data list is empty!")
+                        return
+                    
                     # Tables might be a list of table updates
-                    for table_update in tables_data:
+                    for i, table_update in enumerate(tables_data):
+                        logger.info(f"📊 Processing table update {i}: {type(table_update)}")
+                        
+                        if not isinstance(table_update, dict):
+                            logger.warning(f"📊 Table update {i} is not a dict: {type(table_update)}")
+                            continue
+                            
                         table_name = table_update.get('table_name', '').lower()
+                        logger.info(f"📊 Table update {i} for table: '{table_name}'")
                         
                         # Process inserts
-                        for insert in table_update.get('inserts', []):
+                        inserts = table_update.get('inserts', [])
+                        logger.info(f"📊 Table '{table_name}' has {len(inserts)} inserts")
+                        for insert in inserts:
                             await self._process_table_insert(table_name, insert)
                         
                         # Process updates  
-                        for update in table_update.get('updates', []):
+                        updates = table_update.get('updates', [])
+                        logger.info(f"📊 Table '{table_name}' has {len(updates)} updates")
+                        for update in updates:
                             await self._process_table_update(table_name, update)
                         
                         # Process deletes
-                        for delete in table_update.get('deletes', []):
+                        deletes = table_update.get('deletes', [])
+                        logger.info(f"📊 Table '{table_name}' has {len(deletes)} deletes")
+                        for delete in deletes:
                             await self._process_table_delete(table_name, delete)
+                else:
+                    logger.warning(f"📊 tables_data is unexpected type: {type(tables_data)}")
+                    logger.warning(f"📊 tables_data content: {str(tables_data)[:200]}")
+                    
             else:
-                logger.warning(f"⚠️ No 'tables' key in database update. Keys: {list(db_update.keys())}")
+                logger.warning(f"⚠️ No 'tables' key in database update. Keys: {list(db_update.keys()) if isinstance(db_update, dict) else 'Not a dict'}")
+                
+                # Debug: Log the actual content in detail
+                if isinstance(db_update, dict):
+                    logger.warning("⚠️ Database update structure analysis:")
+                    for key, value in db_update.items():
+                        if isinstance(value, dict):
+                            logger.warning(f"⚠️   {key}: dict with {len(value)} keys: {list(value.keys())}")
+                            # Check if any nested dict has 'tables'
+                            if 'tables' in value:
+                                logger.warning(f"⚠️   Found 'tables' nested in '{key}'!")
+                                nested_tables = value['tables']
+                                logger.warning(f"⚠️   Nested tables type: {type(nested_tables)}")
+                                if isinstance(nested_tables, dict):
+                                    logger.warning(f"⚠️   Nested tables keys: {list(nested_tables.keys())}")
+                        elif isinstance(value, list):
+                            logger.warning(f"⚠️   {key}: list with {len(value)} items")
+                            if len(value) > 0:
+                                logger.warning(f"⚠️   {key}[0]: {type(value[0])} = {str(value[0])[:100]}")
+                        else:
+                            logger.warning(f"⚠️   {key}: {type(value)} = {str(value)[:100]}")
+                else:
+                    logger.warning(f"⚠️ db_update is not a dict: {type(db_update)}")
+                    logger.warning(f"⚠️ db_update content: {str(db_update)[:300]}")
                     
             logger.info(f"✅ Processed database update - Players: {len(self._players)}, Entities: {len(self._entities)}")
                     

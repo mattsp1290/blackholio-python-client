@@ -158,10 +158,16 @@ class SpacetimeDBConnection:
                 
                 # Build WebSocket URL
                 ws_url = self._build_websocket_url()
-                logger.info(f"Connecting to SpacetimeDB at {ws_url}")
+                logger.info(f"🔗 [TIMING] Starting WebSocket connection attempt to {ws_url}")
+                connection_start_time = time.time()
                 
                 # Attempt connection with authentication
+                logger.info(f"🔗 [TIMING] Attempting authentication")
                 success = await self._connect_with_auth(ws_url)
+                
+                if success:
+                    auth_time = time.time() - connection_start_time
+                    logger.info(f"🔗 [TIMING] WebSocket connected and authenticated in {auth_time:.3f}s")
                 
                 if not success:
                     self.state = ConnectionState.FAILED
@@ -175,6 +181,9 @@ class SpacetimeDBConnection:
                 self._reconnect_attempts = 0
                 
                 # Start message handler and heartbeat
+                logger.info(f"🔗 [TIMING] Starting message processing loop")
+                message_handler_start_time = time.time()
+                
                 self._message_handler_task = asyncio.create_task(
                     self._message_handler(),
                     name="message_handler"
@@ -184,15 +193,28 @@ class SpacetimeDBConnection:
                     name="heartbeat_handler"
                 )
                 
+                logger.info(f"🔗 [TIMING] Message handler started in {time.time() - message_handler_start_time:.3f}s")
+                
                 # Send initial subscription request
+                logger.info(f"🔗 [TIMING] Sending initial subscription request")
+                subscription_start_time = time.time()
                 await self._send_subscription_request()
+                logger.info(f"🔗 [TIMING] Subscription request sent in {time.time() - subscription_start_time:.3f}s")
                 
                 # Wait for subscription data to start flowing
+                logger.info(f"🔗 [TIMING] Waiting for subscription data...")
+                subscription_wait_start = time.time()
                 subscription_ready = await self.wait_for_subscription_data(timeout=5.0)
-                if not subscription_ready:
-                    logger.warning("Subscription data not flowing after connection - subscriptions may not be working")
+                subscription_wait_time = time.time() - subscription_wait_start
                 
+                if subscription_ready:
+                    logger.info(f"🔗 [TIMING] Subscription data received in {subscription_wait_time:.3f}s")
+                else:
+                    logger.warning(f"🔗 [TIMING] Subscription data timeout after {subscription_wait_time:.3f}s - subscriptions may not be working")
+                
+                total_connection_time = time.time() - connection_start_time
                 identity_info = f" with identity: {self._identity}" if self._identity else ""
+                logger.info(f"✅ [TIMING] Total connection time: {total_connection_time:.3f}s")
                 logger.info(f"Successfully connected to SpacetimeDB{identity_info} - subscriptions {'active' if subscription_ready else 'pending'}")
                 await self._trigger_event('connected', {
                     'server': self.config.language,
@@ -899,12 +921,51 @@ class SpacetimeDBConnection:
                     
                 elif msg_type == 'DatabaseUpdate':
                     # This is likely the initial subscription data
+                    logger.info(f"📨 [MESSAGE] 📋 CRITICAL DatabaseUpdate analysis starting...")
+                    logger.info(f"📨 [MESSAGE] DatabaseUpdate keys: {list(data.keys())}")
+                    
                     if 'tables' in data:
+                        # Log what's in the tables
+                        tables_data = data.get('tables')
+                        logger.info(f"📨 [MESSAGE] Found 'tables' field - Type: {type(tables_data)}")
+                        
+                        if isinstance(tables_data, dict):
+                            logger.info(f"📨 [MESSAGE] Tables dict has {len(tables_data)} keys: {list(tables_data.keys())}")
+                            
+                            if not tables_data:
+                                logger.error(f"📨 [MESSAGE] ❌ PROBLEM FOUND: Tables dict is EMPTY! This explains the empty data.")
+                            else:
+                                logger.info(f"📨 [MESSAGE] ✅ Tables dict has content - analyzing each table...")
+                                for table_name, table_content in tables_data.items():
+                                    if isinstance(table_content, list):
+                                        logger.info(f"📨 [MESSAGE] Table '{table_name}': {len(table_content)} items")
+                                        if table_content:
+                                            # Log sample data from first item
+                                            try:
+                                                import json
+                                                sample = json.dumps(table_content[0], default=str)[:200]
+                                                logger.info(f"📨 [MESSAGE] Table '{table_name}' sample: {sample}...")
+                                            except Exception as e:
+                                                logger.info(f"📨 [MESSAGE] Table '{table_name}' sample: {repr(table_content[0])}")
+                                    else:
+                                        logger.info(f"📨 [MESSAGE] Table '{table_name}': unexpected type {type(table_content)}")
+                                        
+                        elif isinstance(tables_data, list):
+                            logger.info(f"📨 [MESSAGE] Tables is list with {len(tables_data)} items")
+                            if not tables_data:
+                                logger.error(f"📨 [MESSAGE] ❌ PROBLEM: Tables list is EMPTY!")
+                        else:
+                            logger.warning(f"📨 [MESSAGE] Tables is unexpected type: {type(tables_data)}")
+                        
                         # Store as initial subscription for later processing
                         self._last_initial_subscription = data
-                        logger.info(f"💾 Stored DatabaseUpdate as InitialSubscription data")
+                        logger.info(f"💾 [MESSAGE] Stored DatabaseUpdate as InitialSubscription data")
                         self.on_subscription_data(data)
+                    else:
+                        logger.error(f"📨 [MESSAGE] ❌ MAJOR PROBLEM: DatabaseUpdate has NO 'tables' key! Keys: {list(data.keys())}")
+                        
                     # Trigger both DatabaseUpdate and InitialSubscription events
+                    logger.info(f"📨 [MESSAGE] Triggering DatabaseUpdate and InitialSubscription events")
                     await self._trigger_event(msg_type, data)
                     await self._trigger_event('InitialSubscription', data)
                     return
@@ -1300,6 +1361,23 @@ class SpacetimeDBConnection:
     
     async def _trigger_event(self, event: str, data: Any = None):
         """Trigger event callbacks."""
+        import time
+        import json
+        
+        trigger_start_time = time.time()
+        logger.info(f"🚀 [EVENT] ==> Starting event trigger for '{event}' at {trigger_start_time:.3f}")
+        
+        # Log event data structure for key events
+        if event in ['DatabaseUpdate', 'IdentityToken', 'InitialSubscription']:
+            try:
+                if isinstance(data, dict):
+                    data_summary = {k: f"{type(v).__name__}({len(v) if hasattr(v, '__len__') and not isinstance(v, str) else 'N/A'})" for k, v in data.items()}
+                    logger.info(f"🚀 [EVENT] Event '{event}' data structure: {data_summary}")
+                else:
+                    logger.info(f"🚀 [EVENT] Event '{event}' data type: {type(data)}")
+            except Exception as e:
+                logger.warning(f"🚀 [EVENT] Could not analyze event data: {e}")
+        
         # Map of PascalCase to lowercase event names
         event_mapping = {
             'IdentityToken': 'identity_token',
@@ -1316,32 +1394,59 @@ class SpacetimeDBConnection:
         # If this is a PascalCase event, also trigger the lowercase version
         if event in event_mapping:
             events_to_trigger.append(event_mapping[event])
+            logger.info(f"🚀 [EVENT] Will also trigger lowercase version: {event_mapping[event]}")
         # If this is a lowercase event, also check for PascalCase version
         elif event in event_mapping.values():
             # Find the PascalCase version
             for pascal, lower in event_mapping.items():
                 if lower == event:
                     events_to_trigger.append(pascal)
+                    logger.info(f"🚀 [EVENT] Will also trigger PascalCase version: {pascal}")
                     break
         
+        logger.info(f"🚀 [EVENT] Total events to trigger: {len(events_to_trigger)} - {events_to_trigger}")
+        
         # Trigger callbacks for all event name variations
+        total_callbacks_executed = 0
+        
         for event_name in events_to_trigger:
             callbacks = self._event_callbacks.get(event_name, [])
+            
             if callbacks:
-                logger.info(f"🚀 Triggering event '{event_name}' with {len(callbacks)} callbacks")
-                for callback in callbacks:
+                logger.info(f"🚀 [EVENT] ✅ Triggering event '{event_name}' with {len(callbacks)} callbacks")
+                
+                for i, callback in enumerate(callbacks):
+                    callback_start_time = time.time()
                     try:
-                        logger.debug(f"Calling callback for event '{event_name}'")
+                        logger.info(f"🚀 [EVENT] Executing callback {i+1}/{len(callbacks)} for '{event_name}'")
+                        
                         if asyncio.iscoroutinefunction(callback):
                             await callback(data)
                         else:
                             callback(data)
+                            
+                        callback_duration = time.time() - callback_start_time
+                        logger.info(f"🚀 [EVENT] ✅ Callback {i+1} completed in {callback_duration:.3f}s")
+                        total_callbacks_executed += 1
+                        
                     except Exception as e:
-                        logger.error(f"Error in event callback for {event_name}: {e}")
+                        callback_duration = time.time() - callback_start_time
+                        logger.error(f"🚀 [EVENT] ❌ Callback {i+1} failed after {callback_duration:.3f}s: {e}")
+                        import traceback
+                        logger.error(f"🚀 [EVENT] Callback traceback: {traceback.format_exc()}")
             else:
-                # Only log for the original event name to avoid duplicate logs
-                if event_name == event:
-                    logger.info(f"🚀 Triggering event '{event_name}' with 0 callbacks")
+                # Log missing callbacks with different severity based on event importance
+                if event_name in ['DatabaseUpdate', 'IdentityToken', 'InitialSubscription']:
+                    logger.warning(f"🚀 [EVENT] ⚠️ CRITICAL: No callbacks registered for important event '{event_name}'!")
+                else:
+                    logger.info(f"🚀 [EVENT] 🟡 No callbacks for event '{event_name}'")
+        
+        total_duration = time.time() - trigger_start_time
+        logger.info(f"🚀 [EVENT] <== Event trigger complete. Executed {total_callbacks_executed} callbacks in {total_duration:.3f}s")
+
+    def get_registered_events(self) -> dict:
+        """Return currently registered event callbacks for debugging."""
+        return {event: len(callbacks) for event, callbacks in self._event_callbacks.items()}
 
 
 class BlackholioClient:
