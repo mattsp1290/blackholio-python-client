@@ -477,13 +477,31 @@ class GameClient(GameClientInterface):
         if not request_id:
             request_id = str(uuid.uuid4())
         
+        if not self._active_connection:
+            logger.error(f"❌ [REDUCER] Cannot call reducer '{reducer_name}': No active connection")
+            self._stats['failed_reducers'] += 1
+            return False
+        
         self._pending_reducers[request_id] = ReducerStatus.PENDING
         self._stats['reducer_calls'] += 1
         
-        # Simulate reducer call success
-        self._pending_reducers[request_id] = ReducerStatus.SUCCESS
-        self._stats['successful_reducers'] += 1
-        return True
+        try:
+            logger.info(f"🚀 [REDUCER] Calling reducer '{reducer_name}' with args: {args}")
+            
+            # Delegate to the actual connection implementation
+            result = await self._active_connection.call_reducer(reducer_name, list(args))
+            
+            self._pending_reducers[request_id] = ReducerStatus.SUCCESS
+            self._stats['successful_reducers'] += 1
+            
+            logger.info(f"✅ [REDUCER] Reducer '{reducer_name}' executed successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ [REDUCER] Reducer '{reducer_name}' failed: {e}")
+            self._pending_reducers[request_id] = ReducerStatus.FAILED
+            self._stats['failed_reducers'] += 1
+            return False
 
     async def call_reducer_with_response(self, reducer_name: str, *args, request_id: Optional[str] = None, timeout: Optional[float] = 10.0) -> Dict[str, Any]:
         """Call a reducer and wait for response."""
