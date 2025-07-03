@@ -15,7 +15,7 @@ SERVER_CONFIGS = {
     'rust': {
         'default_port': 3000,
         'db_identity': 'blackholio',
-        'protocol': 'v1.json.spacetimedb',
+        'protocol': 'v1.bsatn.spacetimedb',
         'description': 'Rust SpacetimeDB server implementation'
     },
     'python': {

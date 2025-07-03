@@ -173,37 +173,60 @@ class ModernizedSpacetimeDBConnection:
                 self._event_monitoring_setup = True
             
             # Create SDK client based on server language
+            # The SDK expects host to include the port
+            # Check if host already includes port to avoid duplication
+            if ':' in self._sdk_server_config.host:
+                # Host already includes port, don't add it again
+                host_with_port = self._sdk_server_config.host
+            else:
+                # Host doesn't include port, add it
+                host_with_port = f"{self._sdk_server_config.host}:{self._sdk_server_config.port}"
+            
             if self._sdk_server_config.language.value == 'rust':
                 self._sdk_client = create_rust_client(
-                    host=self._sdk_server_config.host,
+                    host=host_with_port,
                     database=self._sdk_server_config.database,
-                    auth_token=self._sdk_server_config.auth_token
+                    auth_token=self._sdk_server_config.auth_token,
+                    protocol=self.config.protocol  # Use protocol from config
                 )
             elif self._sdk_server_config.language.value == 'python':
                 self._sdk_client = create_python_client(
-                    host=self._sdk_server_config.host,
+                    host=host_with_port,
                     database=self._sdk_server_config.database,
-                    auth_token=self._sdk_server_config.auth_token
+                    auth_token=self._sdk_server_config.auth_token,
+                    protocol=self.config.protocol  # Use protocol from config
                 )
             elif self._sdk_server_config.language.value == 'csharp':
                 self._sdk_client = create_csharp_client(
-                    host=self._sdk_server_config.host,
+                    host=host_with_port,
                     database=self._sdk_server_config.database,
-                    auth_token=self._sdk_server_config.auth_token
+                    auth_token=self._sdk_server_config.auth_token,
+                    protocol=self.config.protocol  # Use protocol from config
                 )
             elif self._sdk_server_config.language.value == 'go':
                 self._sdk_client = create_go_client(
-                    host=self._sdk_server_config.host,
+                    host=host_with_port,
                     database=self._sdk_server_config.database,
-                    auth_token=self._sdk_server_config.auth_token
+                    auth_token=self._sdk_server_config.auth_token,
+                    protocol=self.config.protocol  # Use protocol from config
                 )
             else:
                 raise ServerConfigurationError(f"Unsupported server language: {self._sdk_server_config.language}")
             
-            # Connect using the SDK
-            await self._sdk_client.connect()
+            # The factory methods already return connected clients
+            # No need to call connect() again
             
-            if self._sdk_client.is_connected:
+            # Give the client a moment to establish connection
+            await asyncio.sleep(0.5)
+            
+            logger.info(f"SDK client created: {self._sdk_client}")
+            logger.info(f"SDK client type: {type(self._sdk_client)}")
+            if hasattr(self._sdk_client, 'is_connected'):
+                logger.info(f"SDK client is_connected: {self._sdk_client.is_connected}")
+            if hasattr(self._sdk_client, 'state'):
+                logger.info(f"SDK client state: {self._sdk_client.state}")
+            
+            if self._sdk_client and self._sdk_client.is_connected:
                 self.state = ConnectionState.CONNECTED
                 self._connection_start_time = asyncio.get_event_loop().time()
                 logger.info(f"Successfully connected to {self.config.language} server")
@@ -221,7 +244,8 @@ class ModernizedSpacetimeDBConnection:
         """Disconnect from the SpacetimeDB server."""
         try:
             if self._sdk_client:
-                await self._sdk_client.disconnect()
+                # SDK disconnect is synchronous, not async
+                self._sdk_client.disconnect()
             self.state = ConnectionState.DISCONNECTED
             logger.info("Disconnected from SpacetimeDB server")
         except Exception as e:
@@ -244,7 +268,8 @@ class ModernizedSpacetimeDBConnection:
         
         try:
             # Use SDK subscription functionality
-            subscription_id = await self._sdk_client.subscribe(query)
+            # SDK subscribe is synchronous, not async
+            subscription_id = self._sdk_client.subscribe([query])
             
             if callback:
                 # Register callback for this subscription
@@ -271,7 +296,8 @@ class ModernizedSpacetimeDBConnection:
             raise BlackholioConnectionError("Not connected to server")
         
         try:
-            result = await self._sdk_client.call_reducer(reducer_name, *args)
+            # Use the async version of call_reducer
+            result = await self._sdk_client.call_reducer_async(reducer_name, *args)
             self._messages_sent += 1
             return result
             
