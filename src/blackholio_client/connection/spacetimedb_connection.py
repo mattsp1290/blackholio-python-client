@@ -755,12 +755,22 @@ class SpacetimeDBConnection:
         
         try:
             # Convert args list to proper format for SpacetimeDB
-            # For the enter_game reducer, it expects a single "name" parameter
+            # Each reducer has specific parameter names it expects
             args_dict = {}
             if args:
                 if reducer_name == "enter_game" and len(args) == 1:
-                    # Special case for enter_game reducer which expects "name" parameter
+                    # enter_game expects "name" parameter
                     args_dict = {"name": args[0]}
+                elif reducer_name == "update_player_input" and len(args) == 1:
+                    # update_player_input expects "direction" parameter
+                    # If the arg is already a dict with x,y, wrap it properly
+                    if isinstance(args[0], dict):
+                        args_dict = {"direction": args[0]}
+                    else:
+                        args_dict = {"direction": args[0]}
+                elif reducer_name == "player_split":
+                    # player_split takes no arguments
+                    args_dict = {}
                 elif len(args) == 1:
                     # For other single argument reducers, pass the value directly
                     args_dict = {"value": args[0]}

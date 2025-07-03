@@ -530,7 +530,8 @@ class GameClient(GameClientInterface):
 
     async def leave_game(self) -> bool:
         """Leave the current game."""
-        success = await self.call_reducer("leave_game")
+        # The server uses 'suicide' reducer instead of 'leave_game'
+        success = await self.call_reducer("suicide")
         if success:
             self._is_in_game = False
             self._local_player = None
